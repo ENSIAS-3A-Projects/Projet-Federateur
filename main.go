@@ -7,7 +7,8 @@ import (
 	"list-k8s-resources/pkg/podtool"
 )
 
-// Thin CLI entrypoint that delegates to the podtool package.
+// Package main wires the CLI flags/arguments to the podtool package.
+// It intentionally stays very small so library code can be reused by a future controller.
 func main() {
 	if len(os.Args) < 2 {
 		podtool.PrintGlobalUsage()

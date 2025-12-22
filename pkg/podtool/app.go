@@ -1,5 +1,12 @@
 package podtool
 
+// Package podtool contains the human-facing CLI commands:
+// - "list"  : list non-system pods
+// - "usage" : show CPU/memory requests & limits for a pod
+// - "update": call the actuator library to perform in-place scaling
+//
+// This package is the current "CLI shell" around the lower-level libraries.
+
 import (
 	"context"
 	"fmt"
@@ -74,5 +81,6 @@ func PrintGlobalUsage() {
 	fmt.Println("  k8s-pod-tool usage -namespace default -pod user-service-abc-123")
 	fmt.Println("  k8s-pod-tool update -namespace default -pod user-service-abc-123 -container user-service -cpu 250m -memory 512Mi")
 }
+
 
 
