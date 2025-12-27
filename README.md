@@ -1,281 +1,236 @@
-## Game-Theoretic Collaborative Auto-Scaler (GTCAS)
+# Market-Based Collaborative Auto-Scaler (MBCAS)
 
-**Centralize Policy, Decentralize Execution.**
+**Algorithmic Mechanism Design for Kubernetes Resource Allocation.**  
+A Kubernetes custom controller that treats each node as a **resource market** and allocates **CPU** (and optionally **memory**) using **proportional fairness / Nash Social Welfare** ideas inspired by Fisher markets.
 
-An experimental Kubernetes Custom Controller that treats cluster auto-scaling as a **Potential Game**, enabling microservices to negotiate resources strategically rather than reacting chaotically.
-
-> **What this is:** A Kubernetes controller that uses game theory (potential games, Nash equilibrium, no-regret learning) to coordinate vertical pod scaling across services.
->
-> **What you get:** Less thrashing, fewer noisy neighbors, and safer in-place scaling for CPU and memory.
+> **Core idea:** Instead of reactive thresholds (HPA) or slow iterative learning, MBCAS runs a deterministic **market-clearing** step every control cycle. Microservices run **local agents** that compute *demand signals* from local metrics; the controller converts those signals + budgets into **enforced bids**, clears the market per node, and applies allocations via **in-place pod resize** (`pods/resize`).
 
 ---
 
-## Quick View
+## Why this exists
 
-- **Language:** Go
-- **Target:** Kubernetes (Minikube/dev cluster)
-- **Scaling Mode:** In-place vertical scaling (no restarts)
-- **Core Ideas:** Potential games, Nash equilibrium, no-regret learning, Lyapunov stability
-- **Status:** Experimental / research-grade
+Standard autoscaling treats workloads as isolated optimizers. In shared-node microservice clusters this often leads to:
 
----
+- **Noisy neighbors**: one workload’s spike degrades others
+- **Thrashing**: oscillating limits/requests from competing controllers
+- **Unclear priority**: “important” services don’t reliably win contention
+- **Low utilization**: conservative limits waste capacity
 
-## Code Layout
-
-- **`main.go`**  
-  Thin CLI entrypoint. Parses the first argument (`list`, `usage`, `update`) and delegates to the `podtool` package.
-
-- **`pkg/podtool/`** – **CLI layer (tools for humans)**
-  - `app.go` – Builds the Kubernetes client (`App`), handles kubeconfig/in-cluster config, and provides global CLI usage text.
-  - `list.go` – Implements `k8s-pod-tool list` for listing non-system pods.
-  - `usage.go` – Implements `k8s-pod-tool usage` for showing CPU/memory requests & limits for a pod.
-  - `update.go` – Implements `k8s-pod-tool update` as a thin wrapper around the actuator library.
-
-- **`pkg/actuator/`** – **Phase 1 library (the in-place scaler)**
-  - `actuator.go` – `ApplyScaling` (core in-place scaling API) and `CheckResizeSupport` (verifies `pods/resize` is available).
-
-- **Docs & examples**
-  - `README.md` – High-level overview, architecture, and usage.
-  - `PLAN.md` – Phase-by-phase roadmap (Actuator → Game Engine → Sidecar → Controller → Observability).
-  - `game_theory_concepts_simple.md` – Plain-language guide to key game theory concepts.
-  - `game_theory_for_microservices.md` – Deep dive on applying game theory to microservices.
-  - `demo.yml` – Example pod manifest (`resize-demo`) for exercising in-place scaling.
+MBCAS reframes resource allocation as **collaborative strategy optimization**: services express urgency (demand), the mechanism converts that into a fair allocation, and the system rebalances each cycle.
 
 ---
 
-## Why GTCAS?
+## Key design decision
 
-Standard Kubernetes scaling (HPA/VPA) is reactive and selfish. Each pod scales based on its own local thresholds, often leading to **thrashing** (oscillation) and **noisy neighbor** problems.
+### Who computes bids?
+To remain production-plausible and avoid manipulation, **pods do not send raw bids**.
 
-GTCAS replaces this with a collaborative model. It views the Kubernetes cluster as a multi-agent system where:
+- **Distributed agents (pods) compute demand signals** from *local* state.
+- **Central controller computes and enforces bids** using:
+  - fixed **budgets** (business priority),
+  - observed demand signals,
+  - guardrails (caps/floors/smoothing).
 
-- **The Players**: Microservices (Pods)  
-- **The Strategy**: How much CPU/RAM to request  
-- **The Goal**: Reach a Nash Equilibrium — a stable state where no service can improve its utility without hurting the global system  
-
-Built in Golang, this controller uses **In-Place Pod Vertical Scaling** to resize pods without restarts, ensuring zero downtime.
-
----
-
-## Key Features
-
-- **Potential Game Modeling**  
-  Prevents oscillation by optimizing a single global potential function (Cluster Health) rather than isolated metrics.
-
-- **In-Place Scaling**  
-  Updates Pod resource limits dynamically using Kubernetes Alpha features (no pod restarts required).
-
-- **No-Regret Learning**  
-  Implements algorithms (like Regret Matching) where agents learn from past performance to make better resource requests over time.
-
-- **The "Cooperative Handshake"**  
-  A safety protocol ensuring memory downscaling never crashes a pod (OOM Kill prevention) by enforcing **Individually Rational** constraints.
-
-- **Correlated Equilibrium**  
-  A central arbiter coordinates scaling actions to prevent resource contention, acting like a traffic light for CPU cycles.
+This keeps the project **agent-based** (local decisions), while making the market **truthful-by-design** in practice (no “bid inflation” interface).
 
 ---
 
-## Architecture at a Glance
+## Alignment with PF scope
 
-### 1. The Arbiter (Custom Controller)
+**PF Scope:** implementation and optimization of collaborative strategies in microservices architectures using game theory and agent-based models to improve resource allocation, coordination, and system performance.
 
-A centralized Golang controller that monitors the cluster. It acts as the **Correlated Equilibrium** signal, calculating the optimal resource distribution and sending "suggestions" to the pods.
+MBCAS fits directly:
 
-### 2. The Players (Agents)
-
-Your microservices. Each service aims to maximize its own utility (Performance vs. Cost) while respecting the global potential function.
-
-### 3. The Mechanism (In-Place Scaling)
-
-Unlike standard VPA which evicts (kills) pods to resize them, GTCAS patches the Pod spec directly using the `resize` subresource.
+- **Agent-based models:** each microservice runs a local agent that maps *local metrics → demand signal*.
+- **Game theory / mechanism design:** the controller implements a Fisher-market-inspired allocation rule (proportional fairness / Nash Social Welfare).
+- **Collaborative strategy optimization:** services “yield” resources implicitly as demand falls; the mechanism coordinates a stable, fair outcome under contention.
+- **System performance:** reduces noisy-neighbor impact, stabilizes allocations, improves utilization.
 
 ---
 
-## Game Theory Concepts
+## How it works
 
-This project is built strictly on the following theoretical pillars:
+MBCAS runs a closed-loop control cycle (e.g., every 15 seconds):
 
-| **Concept**            | **Implementation in GTCAS**                                                                                                                                      |
-|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Potential Game**     | The cluster model guarantees that if a pod improves its own utility (without hurting others), the global system state improves. This ensures convergence.       |
-| **Nash Equilibrium**   | Target state where resource requests stabilize. At this point, no service benefits from changing its request, stopping the **thrashing** cycle.                |
-| **No-Regret Learning** | Control loop algorithm. Agents look back at past metrics ("I wish I had more CPU at 2 PM") and adjust future strategies to minimize this regret.              |
-| **Individually Rational** | Safety constraint. A pod rejects a scaling decision if it drops below its **Punishment Level** (minimum resources needed to survive).                      |
-| **Lyapunov Function**  | Uses the potential function as a Lyapunov function to mathematically prove and visualize that the system is converging to stability.                            |
+### 1) Demand reporting (distributed agents)
+Each participating pod runs a lightweight **Demand Agent** (sidecar or embedded library):
 
----
+- **Inputs (local):** request rate, queue depth, latency, CPU throttling, etc.
+- **Static config:** budget/weight (business priority)
+- **Output:** a signed/identified **demand report** to the controller (not a bid)
 
-## The Cooperative Handshake (Memory Safety)
+> Agents remain autonomous: they decide how to interpret local state into urgency.
 
-Vertical scaling of memory is dangerous. If you shrink a container limit faster than the runtime (Java/Go) releases memory, the Pod crashes with an OOM Kill.
+### 2) Market clearing (central mechanism, per node)
+For each node independently:
 
-GTCAS introduces a negotiation protocol:
+- collect demand reports for pods scheduled on that node
+- read node capacity (CPU allocatable)
+- compute **effective bids** = `budget × demand_intensity` (with smoothing/caps)
+- allocate CPU to maximize proportional fairness
 
-1. **Propose**  
-   Controller calculates a new, lower memory limit.
+A single-resource CPU formulation:
 
-2. **Negotiate**  
-   Controller calls the Pod sidecar:
+\[
+\text{maximize } \sum_i \beta_i \log(x_i)\quad \text{s.t. } \sum_i x_i \le C,\ x_i \ge x_{\min}
+\]
 
-   ```http
-   POST /admin/shrink?target=500MB
-   ```
+- \(\beta_i\): enforced effective bid (controller-derived)
+- \(x_i\): CPU allocation (limit or request target)
+- \(C\): node CPU capacity (allocatable)
+- \(x_{\min}\): floor to avoid starvation
 
-3. **Act**  
-   - Sidecar triggers Garbage Collection (GC).  
-   - Sidecar calls `debug.FreeOSMemory()` (Go) or uses JVM flags (Java) to release pages.
+### 3) Actuation (distributed execution)
+The controller applies the resulting allocations using the Kubernetes `pods/resize` subresource.
 
-4. **Verify**  
-   Sidecar checks actual usage:
-   - If **Usage < Target** → returns `200 OK`.  
-   - If **Usage > Target** → returns `409 Conflict`.  
-
-5. **Commit**  
-   Controller only patches Kubernetes if it receives `200 OK`.
+- **Zero downtime** when `resizePolicy` allows `NotRequired`
+- **Guardrails:** cooldowns, change budgets, floors/caps
 
 ---
 
-## Architectural Model
+## Multi-resource stance (explicit)
 
-This model relies on a closed-loop control system that separates the **Brain** (Policy) from the **Body** (Execution).
+### v1 (recommended): CPU-first, memory conservative
+- **CPU:** actively allocated via market clearing.
+- **Memory:**  
+  - **increases allowed** when needed (safe),  
+  - **decreases optional** and only with conservative decay (e.g., ≤ 5% per cycle) to reduce OOM risk.
 
-```text
-                  +---------------------+
-                  |  Observability      |
-                  |  Plane (Prometheus) |
-                  +----------+----------+
-                             ^
-                             | 1. Metrics
-                             |
-      +----------------------+-----------------------+
-      |                 Control Plane                |
-      |             (GTCAS Controller)              |
-      |                                             |
-      |  +-------+      +----------------+         |
-      |  | CTRL  |----->| Game Theory    |         |
-      |  |       |  2   | Engine         |         |
-      |  +-------+      | (Regret Match) |         |
-      |       |         +--------+-------+         |
-      |       | 3. Optimal       |                 |
-      |       v    strategy      v                 |
-      |   +---------------------------+            |
-      |   |         Actuator          |            |
-      |   +-------------+-------------+            |
-      +-----------------+--------------------------+
-                    4. Proposals / Negotiation
-                              |
-                              v
-      +--------------------------------------------------+
-      |                 Execution Plane                  |
-      |                                                  |
-      |   +-------------------+        +-------------+   |
-      |   |   Game-Aware Pod  |        |  K8s API    |   |
-      |   |                   |        +------+------+   |
-      |   | +---------+       |               ^          |
-      |   | | Sidecar |<------------------7  |          |
-      |   | +----+----+       |               |          |
-      |   |      | 5. Trigger GC             | 8. In-   |
-      |   |      v            |              | place    |
-      |   |  +--------+       |              | resize   |
-      |   |  |  App   |-------+--------------+          |
-      |   |  +--------+   6. Accept/Reject              |
-      |   +-------------------+                         |
-      +--------------------------------------------------+
+### v2 (extension): true two-resource market
+A real CPU+memory “bundle” requires an explicit multi-good model or coupling policy. This is an extension, not assumed in v1.
 
-  Prometheus continuously scrapes App metrics.
+---
+
+## QoS note (requests vs limits)
+
+Kubernetes QoS class depends on requests/limits. Changing them can alter:
+
+- scheduling/eviction priority,
+- throttling behavior,
+- whether a pod is **Guaranteed / Burstable / BestEffort**.
+
+**Current actuator implementation patches both `requests` and `limits` together** (same value), which can preserve certain QoS properties but may still affect QoS depending on which resources/containers are specified.
+
+**MBCAS policy** will explicitly define whether it:
+
+- adjusts **limits only** (preferred for many clusters), or
+- adjusts **requests + limits** together (stronger enforcement, different tradeoffs).
+
+---
+
+## CLI Usage
+
+The `k8s-pod-tool` CLI provides a Phase 1 implementation for in-place pod vertical scaling.
+
+### Update Command
+
+Resize pod resources using the `pods/resize` subresource:
+
+```bash
+k8s-pod-tool update -namespace <namespace> -pod <pod-name> [options]
 ```
 
----
+#### Required Flags
 
-## Control Loop Flow
+- `-pod`: Pod name (required)
 
-The controller runs a continuous feedback loop (e.g., every 15 seconds):
+#### Resource Flags
 
-- **Observation (Input)**  
-  Query Prometheus to snapshot the current **Game State** (Golden Signals, CPU/Memory usage).
+- `-cpu`: New CPU value (e.g., `250m`, `1`, `0.5`)
+- `-memory`: New memory value (e.g., `512Mi`, `1Gi`)
 
-- **Deliberation (Logic)**  
-  - Run the **Regret Matching** algorithm in the Game Theory Engine.  
-  - Simulate rounds of the game to find a **Nash Equilibrium** — an allocation where no service wants to deviate.  
-  - Evaluate the **Global Potential Function** to ensure moves improve cluster stability.
+At least one of `-cpu` or `-memory` must be specified.
 
-- **Negotiation (Safety Check)**  
-  - Actuator sends proposals to each sidecar: e.g., "Lower memory to 500Mi".  
-  - Sidecar forces GC and validates safety under **Individually Rational** constraints.  
-  - Unsafe proposals return `409 Conflict` and are discarded.
+#### Policy Flags
 
-- **Execution (Action)**  
-  - Accepted proposals (`200 OK`) are applied via JSON Patch to the Kubernetes API.  
-  - Kubelet performs **in-place resize** of the container’s cgroups without restarting the pod.
+- `-policy`: Resize policy (default: `both`)
+  - `both`: Set both requests and limits to the same value (default, backward compatible)
+  - `limits`: Set only limits, leaving requests unchanged
+  - `requests`: Set only requests, leaving limits unchanged
 
----
+#### Wait Flags
 
-## Key Interactions
+- `-wait`: Wait for resize to complete before returning (default: `false`)
+- `-wait-timeout`: Maximum time to wait for resize completion (default: `30s`)
+- `-poll`: Poll interval when waiting for resize (default: `500ms`)
 
-| **Interaction**            | **Protocol**      | **Description**                                                                |
-|----------------------------|-------------------|--------------------------------------------------------------------------------|
-| Controller → Prometheus    | HTTP / PromQL     | Fetches historical performance data to calculate regret.                       |
-| Controller → Sidecar       | HTTP / REST       | Executes the Cooperative Handshake to prevent OOM kills.                       |
-| Sidecar → App              | Local / Signal    | Triggers memory release (e.g., `debug.FreeOSMemory()`).                        |
-| Controller → Kubernetes API| HTTPS / gRPC      | Patches the pod `resize` subresource for in-place vertical scaling.            |
+#### Other Flags
 
----
+- `-namespace`: Pod namespace (default: `default`)
+- `-container`: Container name (optional, defaults to first container)
+- `-dry-run`: Show planned changes without applying them
 
-## Usage
+### Examples
+
+**Basic resize (both requests and limits):**
+```bash
+k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -memory 256Mi
+```
+
+**Resize limits only:**
+```bash
+k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -policy limits
+```
+
+**Dry-run to preview changes:**
+```bash
+k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -dry-run
+```
+
+**Wait for resize to complete:**
+```bash
+k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -wait -wait-timeout 60s
+```
+
+**Resize specific container:**
+```bash
+k8s-pod-tool update -namespace default -pod my-pod -container app -cpu 500m
+```
+
+### Error Handling
+
+The CLI provides enhanced error messages with actionable hints:
+
+- **RBAC errors**: "check RBAC: you need 'patch' permission on 'pods/resize' subresource"
+- **Feature gate missing**: "enable InPlacePodVerticalScaling feature gate on your cluster"
+- **Invalid quantities**: "verify quantities/policy and runtime support for in-place resize"
+- **Container not found**: Clear error message with container name
 
 ### Prerequisites
 
-- **Minikube** with `InPlacePodVerticalScaling` feature gate enabled  
-- **Golang 1.21+**  
-- **Prometheus** for metric collection  
-
-### 1. Start Minikube with Feature Gates
-
-```bash
-minikube start \
-  --feature-gates=InPlacePodVerticalScaling=true \
-  --extra-config=kubelet.feature-gates=InPlacePodVerticalScaling=true \
-  --extra-config=controller-manager.feature-gates=InPlacePodVerticalScaling=true \
-  --extra-config=scheduler.feature-gates=InPlacePodVerticalScaling=true
-```
-
-### 2. Deploy a Game-Aware Service
-
-Add the annotation to opt-in to the strategy:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: resize-demo
-  annotations:
-    scaling.mesh/strategy: "potential-game"
-spec:
-  template:
-    spec:
-      containers:
-      - name: app
-        image: my-game-aware-app:latest
-        resizePolicy:
-        - resourceName: cpu
-          restartPolicy: NotRequired
-        - resourceName: memory
-          restartPolicy: NotRequired
-```
+- Kubernetes cluster with `InPlacePodVerticalScaling` feature gate enabled
+- Kubernetes version 1.27 or later
+- RBAC permissions to patch `pods/resize` subresource
 
 ---
 
-## Status & Roadmap
+## System architecture
 
-Implementation details and phase breakdown live in `PLAN.md`. At a high level:
-
-- **Phase 1** — Actuator (in-place scaling mechanism)  
-- **Phase 2** — Game Theory Engine (regret matching & potential game)  
-- **Phase 3** — Safety Layer / Sidecar (Individually Rational constraints)  
-- **Phase 4** — Controller Integration (closed-loop control)  
-- **Phase 5** — Observability & Lyapunov-based convergence visualization  
-
-Refer to `PLAN.md` for exact tasks, definitions of done, and test criteria.
-
-
+```text
+   ┌───────────────────────────────┐
+   │     Demand Agents (Pods)      │
+   │  local metrics → demand report│
+   └──────────────┬────────────────┘
+                  │ demand reports
+                  ▼
+   ┌─────────────────────────────────────────────┐
+   │            Market Controller (Go)           │
+   │                                             │
+   │  1) Discover budgets (annotations/CRD)      │
+   │  2) Aggregate demand per node               │
+   │  3) Compute effective bids (enforced)       │
+   │  4) Clear per-node CPU markets              │
+   │  5) Apply guardrails (floors/caps/cooldowns)│
+   │  6) Actuate via pods/resize                 │
+   └──────────────┬──────────────────────────────┘
+                  │ resize patches
+                  ▼
+   ┌─────────────────────────────────────────────┐
+   │           Kubernetes API Server             │
+   │             (pods/resize)                   │
+   └──────────────┬──────────────────────────────┘
+                  ▼
+   ┌─────────────────────────────────────────────┐
+   │               Worker Nodes                  │
+   │           kubelet applies resize            │
+   └─────────────────────────────────────────────┘
