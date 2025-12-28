@@ -22,8 +22,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -31,6 +31,7 @@ import (
 
 	"mbcas/pkg/agent/cgroup"
 	"mbcas/pkg/agent/demand"
+	"mbcas/pkg/allocation"
 )
 
 const (
@@ -52,15 +53,15 @@ const (
 
 // Agent is the main node agent that senses kernel demand and writes allocations.
 type Agent struct {
-	k8sClient    kubernetes.Interface
-	nodeName     string
-	ctx          context.Context
-	cancel       context.CancelFunc
+	k8sClient kubernetes.Interface
+	nodeName  string
+	ctx       context.Context
+	cancel    context.CancelFunc
 
 	// State
-	podDemands   map[types.UID]*demand.Tracker
-	allocations  map[types.UID]string // pod UID -> current allocation
-	mu           sync.RWMutex
+	podDemands  map[types.UID]*demand.Tracker
+	allocations map[types.UID]string // pod UID -> current allocation
+	mu          sync.RWMutex
 
 	// Components
 	cgroupReader *cgroup.Reader
@@ -253,8 +254,8 @@ func (a *Agent) writeAllocations() error {
 		podMap[pod.UID] = pod
 	}
 
-	// Compute allocations (baseline + proportional)
-	allocations := a.computeAllocations(demands, availableCPU, len(demands))
+	// Compute allocations using market-clearing (Phase 4)
+	allocations := a.computeAllocations(demands, availableCPU, podMap, nodeCapacity)
 
 	// Write allocations
 	for uid, cpuAllocation := range allocations {
@@ -314,52 +315,46 @@ func (a *Agent) discoverPods() ([]*corev1.Pod, error) {
 	return pods, nil
 }
 
-// computeAllocations computes CPU allocations using baseline + proportional model.
+// computeAllocations computes CPU allocations using market-clearing (Phase 4).
 //
-// Allocation model:
-//   - Baseline: minimum CPU per pod (prevents starvation)
-//   - Proportional: remaining CPU distributed by demand
-//   - Allocation targets the pod as a unit (via PodAllocation)
-//   - Multi-container pods: allocation applies to first container (controller handles this)
-func (a *Agent) computeAllocations(demands map[types.UID]float64, availableCPU float64, podCount int) map[types.UID]string {
-	// Parse baseline
+// Phase 4: Market-based allocation using Fisher-market / proportional fairness.
+//   - Uses Kubernetes-native primitives (requests, limits, PriorityClass)
+//   - Maximizes Nash Social Welfare: Σ log(cpu_i)
+//   - Handles bounds correctly (min/max enforcement)
+//   - Deterministic water-filling with caps
+func (a *Agent) computeAllocations(
+	demands map[types.UID]float64,
+	availableCPU float64,
+	podMap map[types.UID]*corev1.Pod,
+	nodeCapacity float64,
+) map[types.UID]string {
+	// Parse baseline once (not in hot loop)
 	baselineQty, _ := resource.ParseQuantity(BaselineCPUPerPod)
 	baselineMilli := baselineQty.MilliValue()
-	baselineCPU := float64(baselineMilli) / 1000.0
 
-	// Ensure baseline doesn't exceed capacity
-	maxBaseline := availableCPU / float64(2*podCount)
-	if baselineCPU > maxBaseline {
-		baselineCPU = maxBaseline
-	}
+	// Convert capacities to millicores
+	availableMilli := int64(availableCPU * 1000)
+	nodeCapMilli := int64(nodeCapacity * 1000)
 
-	// Compute total baseline
-	totalBaseline := baselineCPU * float64(podCount)
-	remaining := availableCPU - totalBaseline
-	if remaining < 0 {
-		remaining = 0
-	}
-
-	// Sum all demands
-	var totalDemand float64
-	for _, d := range demands {
-		totalDemand += d
-	}
-
-	// Allocate: baseline + proportional share of remaining
-	allocations := make(map[types.UID]string)
+	// Build PodParams for each pod
+	podParams := make(map[types.UID]allocation.PodParams)
 	for uid, demand := range demands {
-		var cpu float64
-		if totalDemand > 0 {
-			proportional := (demand / totalDemand) * remaining
-			cpu = baselineCPU + proportional
-		} else {
-			cpu = baselineCPU
+		pod, exists := podMap[uid]
+		if !exists {
+			continue
 		}
 
-		// Convert to resource quantity string
-		cpuMilli := int64(cpu * 1000)
-		allocations[uid] = fmt.Sprintf("%dm", cpuMilli)
+		params := a.demandCalc.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
+		podParams[uid] = params
+	}
+
+	// Clear market using Phase 4 solver
+	allocationsMilli := allocation.ClearMarket(availableMilli, podParams)
+
+	// Convert to string format ("${m}m")
+	allocations := make(map[types.UID]string)
+	for uid, milli := range allocationsMilli {
+		allocations[uid] = fmt.Sprintf("%dm", milli)
 	}
 
 	return allocations
@@ -405,4 +400,3 @@ func abs(x int64) int64 {
 	}
 	return x
 }
-
