@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"list-k8s-resources/pkg/actuator"
+	"mbcas/pkg/actuator"
 )
 
 // RunUpdate implements the `update` subcommand using the pod/resize subresource.

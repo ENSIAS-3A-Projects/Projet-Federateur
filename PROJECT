@@ -1,0 +1,16 @@
+domain: mbcas.io
+layout: go.kubebuilder.io/v4
+projectName: mbcas
+repo: mbcas
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: false
+  domain: mbcas.io
+  group: allocation
+  kind: PodAllocation
+  path: mbcas/api/v1alpha1
+  version: v1alpha1
+version: "3"
+

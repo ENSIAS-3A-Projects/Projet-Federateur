@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"list-k8s-resources/pkg/podtool"
+	"mbcas/pkg/podtool"
 )
 
 // Package main wires the CLI flags/arguments to the podtool package.

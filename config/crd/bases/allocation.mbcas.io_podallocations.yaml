@@ -1,0 +1,120 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: podallocations.allocation.mbcas.io
+spec:
+  group: allocation.mbcas.io
+  names:
+    kind: PodAllocation
+    listKind: PodAllocationList
+    plural: podallocations
+    singular: podallocation
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .spec.podName
+      name: Pod
+      type: string
+    - jsonPath: .spec.desiredCPULimit
+      name: Desired CPU
+      type: string
+    - jsonPath: .status.appliedCPULimit
+      name: Applied CPU
+      type: string
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          PodAllocation is the Schema for the podallocations API.
+          It represents a single authoritative control object for CPU allocation decisions.
+
+          The PodAllocation is Namespaced (not Cluster-scoped) to:
+            - Align with Pod lifecycle (pods are namespaced)
+            - Avoid RBAC complexity
+            - Prevent cross-tenant leakage
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PodAllocationSpec defines the desired state of PodAllocation.
+            properties:
+              desiredCPULimit:
+                description: |-
+                  DesiredCPULimit is the desired CPU limit for the pod.
+                  This is a Kubernetes resource quantity string (e.g., "500m", "1", "2.5").
+                type: string
+              namespace:
+                description: Namespace is the namespace of the target pod.
+                type: string
+              podName:
+                description: PodName is the name of the target pod.
+                type: string
+            required:
+            - desiredCPULimit
+            - namespace
+            - podName
+            type: object
+          status:
+            description: PodAllocationStatus defines the observed state of PodAllocation.
+            properties:
+              appliedCPULimit:
+                description: |-
+                  AppliedCPULimit is the CPU limit that was last successfully applied to the pod.
+                  This may differ from desiredCPULimit if the application is in progress or failed.
+                type: string
+              lastAppliedTime:
+                description: LastAppliedTime is the timestamp when the CPU limit was
+                  last successfully applied.
+                format: date-time
+                type: string
+              lastAttemptTime:
+                description: LastAttemptTime is the timestamp of the last attempt
+                  to apply the CPU limit.
+                format: date-time
+                type: string
+              phase:
+                description: |-
+                  Phase represents the current phase of the allocation.
+                  Possible values: Pending, Applied, Failed
+                enum:
+                - Pending
+                - Applied
+                - Failed
+                type: string
+              reason:
+                description: Reason provides a human-readable reason for the current
+                  phase.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
