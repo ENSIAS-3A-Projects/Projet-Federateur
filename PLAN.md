@@ -1,258 +1,333 @@
-# PLAN.md — Market-Based Collaborative Auto-Scaler (MBCAS)
 
-## Project framing
 
-**MBCAS** is a Kubernetes custom controller that treats each node as a **resource market** and allocates resources using **mechanism design** ideas (proportional fairness / Nash Social Welfare). It is designed to stay within the PF scope:
+# PLAN.md — MBCAS Project Plan
 
-> **PF Scope:** implementation and optimization of collaborative strategies in microservices architectures using game theory and agent-based models to improve resource allocation, coordination, and system performance.
+## Project Goal
 
-### Design principles
+Design and implement a **market-based, kernel-informed CPU allocation system for Kubernetes** that dynamically redistributes CPU among running pods using real execution pressure, without relying on user configuration, external metrics systems, or Kubernetes autoscalers such as HPA.
 
-1. **Agent-based sensing (distributed):** each microservice runs a lightweight agent that converts local signals (RPS/latency/queue depth/throttling) into a **demand intensity**.
-2. **Centralized decision-making:** the controller computes **effective bids** (budget × demand) and clears a **per-node market** deterministically each control cycle.
-3. **Distributed execution:** the controller applies the allocation using **in-place pod resize** (`pods/resize`) via the actuator library.
-4. **CPU-first; memory conservative:** v1 focuses on CPU markets; memory is increase-only (or very slow decay) to avoid OOM risk.
-5. **Single-writer safety:** MBCAS should not fight HPA/VPA. Run opt-in and/or clearly define knob ownership (requests vs limits).
+The system must:
 
----
-
-## Phase 1: Infrastructure (The Actuator)
-
-**Goal:** Provide a reusable Go library to apply in-place vertical scaling (`pods/resize`) safely and predictably.  
-**Status:** ✅ **Complete**  
-**Dependency:** Kubernetes cluster with `pods/resize` support.
-
-### What’s included (Phase 1 hardening)
-- Container existence validation (`resolveContainer`)
-- CPU/memory quantity validation (`resource.ParseQuantity`)
-- Resize policy control: `both | limits | requests`
-- Optional wait for resize completion (poll + timeout)
-- Dry-run that shows the planned patch
-- Unit tests for patch generation, validation, retry, and support checks
-
-### Deliverable
-✅ `pkg/actuator` library + CLI wrapper that can resize pods in-place reliably.
-
-### Definition of Done
-- [x] Actuator applies `pods/resize` with retries on conflict.
-- [x] CLI supports `--policy`, `--dry-run`, and `--wait`.
-- [x] Unit tests validate patch structure across policies.
-- [x] Manual test: resize a running pod without changing restart count.
+* be Kubernetes-native
+* maximize CPU utilization and fairness
+* remain stable under real workloads
+* reuse existing, proven tools wherever possible
+* avoid unnecessary complexity
 
 ---
 
-## Phase 2: Agents (Demand Reporting)
+## Guiding Principles
 
-**Goal:** Implement agent-based demand reporting inside microservices (sidecar or library) so each pod contributes **local state** to the collaborative allocation strategy.  
-**Constraint:** Agents do **not** send free-form bids. They send **demand intensity** only.  
-**Why:** avoids strategic bid inflation; controller enforces budgets and computes effective bids centrally.
+1. **Reuse before build**
+   If Kubernetes or Linux already provides it, use it.
 
-### Agent Output (Demand Report)
-Each agent produces a demand signal:
+2. **Kernel truth over declared intent**
+   Real pressure beats configured metrics.
 
-- `demand_intensity ∈ [0, 1]` (normalized urgency)
-- optional breakdown signals (for debugging): latency pressure, queue pressure, throttling pressure
+3. **One responsibility per component**
+   Sensing, decision, enforcement are separate.
+
+4. **Control-plane simplicity**
+   No custom networking, no receivers, no streaming protocols.
+
+5. **Stability over aggressiveness**
+   Avoid oscillations even at the cost of slower convergence.
+
+---
+
+## Current Status (Baseline)
+
+### Completed
+
+* In-place pod resizing actuator using `pods/resize`
+* CLI for manual inspection and testing
+
+### Not Yet Implemented
+
+* Node agent
+* Demand sensing
+* Allocation logic
+* CRDs
+* Controllers
+
+This is intentional and correct.
+
+---
+
+## High-Level Architecture (Target)
+
+```
+Linux Kernel (cgroups, PSI)
+        ↓
+Node Agent (DaemonSet)
+        ↓
+PodAllocation (CRD)
+        ↓
+Controller
+        ↓
+Actuator (existing)
+        ↓
+pods/resize
+```
+
+Kubernetes Scheduler remains unchanged and continues to control placement.
+
+---
+
+## Phase 1 — Control Contract (CRD)
+
+### Objective
+
+Define a **single authoritative control object** for CPU allocation decisions.
+
+### Tooling
+
+* Kubernetes CRDs
+* controller-runtime code generation
 
 ### Tasks
 
-1. **Define the demand contract**
-   - Create `pkg/agent/contracts.go` (or `docs/agent.md`) with:
-     - demand definition
-     - units and normalization
-     - required labels: pod, namespace, container
+* Define `PodAllocation` CRD
+* One object per pod (name = pod UID)
+* Fields:
 
-2. **Implement a minimal Demand Agent (sidecar)**
-   - Option A (recommended for Phase 2): agent exports Prometheus metrics:
-     - `mbcas_demand_intensity{namespace,pod,container} 0.0..1.0`
-   - Option B: agent exposes HTTP endpoint `/demand` returning JSON.
+  * desired CPU limit
+  * status (applied, timestamps, reason)
+* No user-facing configuration
+* No validation webhooks
+* No multiple versions
 
-3. **Demand function v1 (simple + stable)**
-   - Implement a conservative mapping using one or two signals:
-     - queue depth (if available) and/or request rate
-     - optional latency threshold breach
-   - Normalize into `[0,1]` and apply smoothing in-agent (EWMA).
+### Rationale
 
-4. **Opt-in configuration**
-   - Define annotations:
-     - `mbcas.enabled: "true"`
-     - `mbcas.budget: "<int>"`
-     - optional bounds: `mbcas.minCPU`, `mbcas.maxCPU`
+CRDs provide:
 
-### Deliverable
-- A `mbcas-demand-agent` image and a demo deployment that exports `mbcas_demand_intensity`.
+* persistence
+* observability
+* reconciliation semantics
+* auditability
 
-### Definition of Done
-- [ ] Under load, the agent metric increases and decreases predictably (no severe jitter).
-- [ ] A pod without agent still functions (controller falls back to safe default demand).
-- [ ] Demo YAML shows injection + scraping working end-to-end.
+No custom APIs required.
 
 ---
 
-## Phase 3: Market Clearing Engine (Pure Logic)
+## Phase 2 — Actuation Controller
 
-**Goal:** Implement the market-clearing solver that converts (capacity, budgets, demand) into CPU allocations.  
-**Constraint:** Pure logic package. No Kubernetes dependencies.  
-**Focus:** CPU-only market in v1.
+### Objective
 
-### Model (CPU-first)
-For each node:
+Enforce CPU decisions declaratively.
 
-- Inputs:
-  - `C`: allocatable CPU capacity (millicores)
-  - for each pod `i` on node:
-    - `budget_i` (business priority weight)
-    - `demand_i ∈ [0,1]`
-    - `min_i`, `max_i` bounds (optional)
-- Controller computes effective bid:
-  - `β_i = budget_i * f(demand_i)` (after smoothing & caps)
+### Tooling
 
-### Allocation rule (proportional fairness)
-Start with a deterministic proportional solver that supports floors/caps:
-
-1. Reserve floors: allocate `min_i` to each participant (if set)
-2. Distribute remaining capacity proportionally:
-   - `x_i = min_i + (β_i / Σβ) * remaining`
-3. If any `x_i > max_i`, clamp and redistribute leftover (water-filling)
+* controller-runtime
+* existing `pkg/actuator`
 
 ### Tasks
 
-1. **Create `pkg/market`**
-   - Types: `NodeMarketInput`, `Allocation`, `Reasoning`
-   - Function: `SolveCPU(input) (allocations, debug, error)`
+* Implement controller watching:
 
-2. **Implement water-filling with caps**
-   - Ensure stable behavior when some services hit max.
+  * `PodAllocation`
+  * `Pod`
+* Compare desired vs actual CPU
+* Apply changes using the actuator
+* Update status and emit Kubernetes Events
 
-3. **Add guardrail hooks**
-   - Max delta per cycle (CPU)
-   - Cooldowns (enforced in controller later, but represented in solver debug)
+### Safety Rules
 
-4. **Unit tests**
-   - proportional split baseline
-   - floors only
-   - caps only
-   - floors + caps + redistribution
-   - zero/empty demand handling
+* Mutate CPU limits only
+* Rate-limit resizes per pod
+* Maximum step size per resize
 
-### Deliverable
-- `pkg/market` solver that produces deterministic CPU allocations per node.
+### Rationale
 
-### Definition of Done
-- [ ] `go test ./...` includes full solver test coverage.
-- [ ] Given fixed input, allocations are stable and reproducible.
-- [ ] Solver never exceeds capacity and never violates min/max bounds.
+Controller-runtime provides:
+
+* caching
+* retries
+* backoff
+* leader election (optional)
+
+No custom loops required.
 
 ---
 
-## Phase 4: Controller Integration (Observe → Clear → Actuate)
+## Phase 3 — Node Agent (Kernel Demand Sensing)
 
-**Goal:** Build the in-cluster controller that runs the control loop every 15 seconds and applies allocations safely.  
-**Role:** Central market maker + policy enforcer + single writer for resizing.
+### Objective
 
-### Control Loop (every 15s)
-1. **Discover participants**
-   - pods with `mbcas.enabled=true`
-   - read budgets and bounds from annotations/CRD
-2. **Read demand**
-   - from Prometheus (`mbcas_demand_intensity`) or HTTP endpoint
-3. **Group by node**
-   - per-node markets (topology constraint)
-4. **Solve**
-   - call `pkg/market.SolveCPU(...)`
-5. **Apply guardrails**
-   - smoothing of effective bids
-   - max CPU delta per cycle
-   - cooldowns
-6. **Actuate**
-   - call `pkg/actuator.ApplyScaling` with `policy=limits` by default
+Infer real CPU demand using kernel signals.
+
+### Tooling
+
+* Linux cgroups
+* Linux PSI
+* Kubernetes client-go
+* DaemonSet
 
 ### Tasks
 
-1. **Controller skeleton**
-   - Use `controller-runtime` or a simple loop (Phase 4 can start as loop).
-   - Reconcile period: 15s.
+* Deploy lightweight agent per node
+* Read:
 
-2. **Participant discovery**
-   - Label/annotation selector for opt-in pods.
-   - Resolve node placement.
+  * CPU throttling (cgroups)
+  * CPU PSI
+* Aggregate per pod
+* Normalize demand ∈ [0,1]
+* Smooth signals (fast up, slow down)
+* Write desired CPU into `PodAllocation`
 
-3. **Demand ingestion**
-   - Prometheus query integration:
-     - query by pod label set
-     - handle missing series safely
+### Explicit Non-Goals
 
-4. **Actuation strategy**
-   - Default to **CPU limits-only** policy to reduce QoS surprises.
-   - Add optional mode to adjust requests+limits for controlled experiments.
+* No gRPC
+* No HTTP endpoints
+* No Prometheus dependency
+* No time-series storage
 
-5. **Safety**
-   - Always include floors and max caps.
-   - Never downscale memory aggressively (memory increase-only in v1).
-   - Abort changes if cluster lacks `pods/resize`.
+### Rationale
 
-### Deliverable
-- `mbcas-controller` binary/container running in cluster and resizing a demo workload under changing load.
+Kernel signals are:
 
-### Definition of Done
-- [ ] Logs show full loop: Discover → Demand → Solve → Guardrail → Patch.
-- [ ] Under load spike, high-budget services receive larger CPU share than low-budget.
-- [ ] Allocations do not oscillate wildly (bounded by cooldown + max delta).
-- [ ] No fights with other controllers in the demo namespace (single-writer setup).
+* always available
+* low overhead
+* truthful by construction
 
 ---
 
-## Phase 5: Observability & Evaluation (Proof of Collaboration)
+## Phase 4 — Market-Based Allocation Logic
 
-**Goal:** Demonstrate that the collaborative mechanism improves coordination, fairness, and stability versus baseline autoscaling approaches.
+### Objective
 
-### Metrics to expose
-- `mbcas_alloc_cpu_mcores{pod}` (allocated CPU)
-- `mbcas_effective_bid{pod}` (controller-derived β)
-- `mbcas_demand_intensity{pod}` (agent-reported)
-- `mbcas_resize_events_total{pod,action}`
-- `mbcas_resize_delta_mcores{pod}`
-- Optional evaluation metrics:
-  - fairness ratio: `alloc_share / budget_share`
-  - stability: average absolute delta per cycle
-  - noisy-neighbor impact proxy: throttle time / latency spikes
+Replace HPA-style scaling with a **market-clearing allocation rule**.
+
+### Tooling
+
+* Pure Go logic
+* No Kubernetes dependencies in solver
+
+### Allocation Model
+
+* CPU is a finite divisible good
+* Pods are agents
+* Kernel pressure acts as implicit bids
+* Allocation approximates proportional fairness
+
+Formally:
+
+* Maximize Nash Social Welfare under node capacity
 
 ### Tasks
 
-1. **Controller exports Prometheus metrics**
-   - allocations, bids, resize events, rejections (if any)
+* Compute baseline fair share per pod
+* Distribute remaining CPU proportional to demand
+* Enforce min/max CPU bounds
+* Ignore insignificant changes (hysteresis)
 
-2. **Grafana dashboard**
-   - Panel 1: CPU usage vs allocated CPU (efficiency)
-   - Panel 2: allocations vs budgets (fairness)
-   - Panel 3: resize deltas per cycle (stability)
-   - Panel 4: demand intensity vs allocation (responsiveness)
+### Rationale
 
-3. **Evaluation experiments**
-   - A/B: HPA-only vs MBCAS (CPU-only)
-   - Stress test: noisy neighbor on same node
-   - Outcome measures: latency p95, throttle time, stability deltas
+This provides:
 
-### Deliverable
-- Grafana dashboard JSON + demo runbook.
-
-### Definition of Done
-- [ ] Dashboard demonstrates reduced noisy-neighbor impact under contention.
-- [ ] Allocation correlates with budgets under contention (priority works).
-- [ ] Resize deltas remain bounded (no thrash).
+* fairness
+* efficiency
+* stability
+* incentive compatibility
 
 ---
 
-## Optional extensions (post-PF / stretch goals)
+## Phase 5 — Stability and Safety Hardening
 
-1. **Memory policy v2**
-   - increase-fast, decrease-slow with strict decay
-   - runtime hints (optional advisory sidecar signals)
+### Objective
 
-2. **True CPU+memory market**
-   - multi-good model or explicit coupling rules
-   - publish assumptions clearly
+Ensure correctness under real workloads.
 
-3. **Admission control / CRD policy**
-   - centralized budget governance (FinOps)
-   - namespace-level budgets and floors
+### Tooling
+
+* Simple control rules
+* No advanced control frameworks
+
+### Measures
+
+* Demand smoothing
+* Deadbands
+* Cooldowns
+* Warm-up period for new pods
+* Node-level CPU reserve
+* Guaranteed pod exclusion
+
+### Rationale
+
+These are standard control-theory safeguards implemented with minimal code.
+
+---
+
+## Phase 6 — Operational Visibility
+
+### Objective
+
+Maintain debuggability and predictability.
+
+### Tooling
+
+* Kubernetes Events
+* CRD status fields
+* Optional metrics endpoints (no dependency)
+
+### Tasks
+
+* Record reason for each allocation
+* Expose last-applied CPU
+* Emit resize events
+
+### Rationale
+
+CRDs act as the system’s observable state without external tooling.
+
+---
+
+## Phase 7 — Evaluation and Validation
+
+### Objective
+
+Demonstrate effectiveness and academic relevance.
+
+### Metrics
+
+* CPU utilization
+* Throttling reduction
+* PSI improvement
+* Allocation stability
+* Reaction time vs HPA
+
+### Method
+
+* Compare against HPA on identical workloads
+* Stress-test under contention
+* Observe convergence behavior
+
+---
+
+## Explicit Non-Goals
+
+The project will **not**:
+
+* Integrate with Prometheus
+* Use HPA or VPA
+* Require user annotations
+* Modify the scheduler
+* Store raw metrics in CRDs
+* Implement multi-resource optimization (CPU only)
+
+---
+
+## Final Deliverables
+
+* Kubernetes controller binary
+* Node agent DaemonSet
+* `PodAllocation` CRD
+* Reusable actuator library
+* Evaluation results and analysis
+
+---
+
+## Summary
+
+MBCAS explores how **market-based, kernel-informed mechanisms** can replace configuration-heavy autoscaling in Kubernetes. By reusing existing platform primitives and grounding decisions in real execution pressure, the project aims to deliver a simpler, fairer, and more efficient approach to CPU allocation in microservices systems.
 

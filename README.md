@@ -1,236 +1,202 @@
-# Market-Based Collaborative Auto-Scaler (MBCAS)
 
-**Algorithmic Mechanism Design for Kubernetes Resource Allocation.**  
-A Kubernetes custom controller that treats each node as a **resource market** and allocates **CPU** (and optionally **memory**) using **proportional fairness / Nash Social Welfare** ideas inspired by Fisher markets.
+# MBCAS — Market-Based CPU Allocation System
 
-> **Core idea:** Instead of reactive thresholds (HPA) or slow iterative learning, MBCAS runs a deterministic **market-clearing** step every control cycle. Microservices run **local agents** that compute *demand signals* from local metrics; the controller converts those signals + budgets into **enforced bids**, clears the market per node, and applies allocations via **in-place pod resize** (`pods/resize`).
+## Overview
 
----
+MBCAS is a Kubernetes-native system for **dynamic CPU allocation** in microservices architectures.
+It replaces configuration-driven autoscaling mechanisms with a **market-based allocation mechanism** that reallocates CPU resources according to **real execution pressure observed by the Linux kernel**.
 
-## Why this exists
-
-Standard autoscaling treats workloads as isolated optimizers. In shared-node microservice clusters this often leads to:
-
-- **Noisy neighbors**: one workload’s spike degrades others
-- **Thrashing**: oscillating limits/requests from competing controllers
-- **Unclear priority**: “important” services don’t reliably win contention
-- **Low utilization**: conservative limits waste capacity
-
-MBCAS reframes resource allocation as **collaborative strategy optimization**: services express urgency (demand), the mechanism converts that into a fair allocation, and the system rebalances each cycle.
+Instead of relying on user-defined metrics, annotations, or external monitoring systems, MBCAS treats CPU allocation as a **continuous resource allocation game** among co-located services, using kernel pressure signals as implicit bids and enforcing decisions via in-place pod resizing.
 
 ---
 
-## Key design decision
+## Academic Context (Projet Fédérateur)
 
-### Who computes bids?
-To remain production-plausible and avoid manipulation, **pods do not send raw bids**.
+This project is developed within the scope of a **Projet Fédérateur (PF)** focused on:
 
-- **Distributed agents (pods) compute demand signals** from *local* state.
-- **Central controller computes and enforces bids** using:
-  - fixed **budgets** (business priority),
-  - observed demand signals,
-  - guardrails (caps/floors/smoothing).
+> *The implementation and optimization of collaborative strategies in microservices architectures using game theory and agent-based models to improve resource allocation, coordination, and overall system performance.*
 
-This keeps the project **agent-based** (local decisions), while making the market **truthful-by-design** in practice (no “bid inflation” interface).
+MBCAS directly addresses this objective by modeling each microservice (pod) as an **agent** competing for a finite shared resource (CPU) at the node level. Coordination emerges implicitly through runtime behavior rather than explicit communication or configuration.
+
+The system implements a **Fisher-market-inspired mechanism** that approximates **proportional fairness**, equivalent to maximizing **Nash Social Welfare**, under real system constraints.
 
 ---
 
-## Alignment with PF scope
+## Motivation
 
-**PF Scope:** implementation and optimization of collaborative strategies in microservices architectures using game theory and agent-based models to improve resource allocation, coordination, and system performance.
+Kubernetes autoscaling mechanisms (HPA, VPA) have several limitations:
 
-MBCAS fits directly:
+* Depend on **user configuration** and tuning
+* Rely on **indirect metrics** (CPU usage, request ratios)
+* Require **external metrics pipelines** (e.g., Prometheus)
+* React slowly to contention
+* Cannot observe **kernel-level execution stalls**
 
-- **Agent-based models:** each microservice runs a local agent that maps *local metrics → demand signal*.
-- **Game theory / mechanism design:** the controller implements a Fisher-market-inspired allocation rule (proportional fairness / Nash Social Welfare).
-- **Collaborative strategy optimization:** services “yield” resources implicitly as demand falls; the mechanism coordinates a stable, fair outcome under contention.
-- **System performance:** reduces noisy-neighbor impact, stabilizes allocations, improves utilization.
+As a result, clusters often suffer from:
 
----
+* CPU overprovisioning
+* Throttling under load
+* Oscillations caused by delayed feedback
+* High operational complexity
 
-## How it works
-
-MBCAS runs a closed-loop control cycle (e.g., every 15 seconds):
-
-### 1) Demand reporting (distributed agents)
-Each participating pod runs a lightweight **Demand Agent** (sidecar or embedded library):
-
-- **Inputs (local):** request rate, queue depth, latency, CPU throttling, etc.
-- **Static config:** budget/weight (business priority)
-- **Output:** a signed/identified **demand report** to the controller (not a bid)
-
-> Agents remain autonomous: they decide how to interpret local state into urgency.
-
-### 2) Market clearing (central mechanism, per node)
-For each node independently:
-
-- collect demand reports for pods scheduled on that node
-- read node capacity (CPU allocatable)
-- compute **effective bids** = `budget × demand_intensity` (with smoothing/caps)
-- allocate CPU to maximize proportional fairness
-
-A single-resource CPU formulation:
-
-\[
-\text{maximize } \sum_i \beta_i \log(x_i)\quad \text{s.t. } \sum_i x_i \le C,\ x_i \ge x_{\min}
-\]
-
-- \(\beta_i\): enforced effective bid (controller-derived)
-- \(x_i\): CPU allocation (limit or request target)
-- \(C\): node CPU capacity (allocatable)
-- \(x_{\min}\): floor to avoid starvation
-
-### 3) Actuation (distributed execution)
-The controller applies the resulting allocations using the Kubernetes `pods/resize` subresource.
-
-- **Zero downtime** when `resizePolicy` allows `NotRequired`
-- **Guardrails:** cooldowns, change budgets, floors/caps
+MBCAS explores an alternative approach: **let the operating system reveal true demand**, and use that information to coordinate resource allocation automatically.
 
 ---
 
-## Multi-resource stance (explicit)
+## Core Idea
 
-### v1 (recommended): CPU-first, memory conservative
-- **CPU:** actively allocated via market clearing.
-- **Memory:**  
-  - **increases allowed** when needed (safe),  
-  - **decreases optional** and only with conservative decay (e.g., ≤ 5% per cycle) to reduce OOM risk.
+MBCAS treats CPU allocation as a **market-clearing problem**:
 
-### v2 (extension): true two-resource market
-A real CPU+memory “bundle” requires an explicit multi-good model or coupling policy. This is an extension, not assumed in v1.
+* CPU is a finite divisible good
+* Pods are agents competing for CPU
+* Kernel pressure (CPU throttling, PSI) represents implicit demand
+* A controller redistributes CPU proportionally to observed demand
+* Allocations are enforced using Kubernetes in-place resizing
 
----
-
-## QoS note (requests vs limits)
-
-Kubernetes QoS class depends on requests/limits. Changing them can alter:
-
-- scheduling/eviction priority,
-- throttling behavior,
-- whether a pod is **Guaranteed / Burstable / BestEffort**.
-
-**Current actuator implementation patches both `requests` and `limits` together** (same value), which can preserve certain QoS properties but may still affect QoS depending on which resources/containers are specified.
-
-**MBCAS policy** will explicitly define whether it:
-
-- adjusts **limits only** (preferred for many clusters), or
-- adjusts **requests + limits** together (stronger enforcement, different tradeoffs).
+No user annotations, no application instrumentation, and no external metrics systems are required.
 
 ---
 
-## CLI Usage
+## High-Level Architecture
 
-The `k8s-pod-tool` CLI provides a Phase 1 implementation for in-place pod vertical scaling.
+MBCAS consists of three main components:
 
-### Update Command
+### 1. Node Agent (DaemonSet)
 
-Resize pod resources using the `pods/resize` subresource:
+A lightweight agent runs on every node and:
 
-```bash
-k8s-pod-tool update -namespace <namespace> -pod <pod-name> [options]
+* Reads kernel-level signals:
+
+  * CPU throttling from cgroups
+  * CPU pressure via PSI
+* Aggregates signals per pod
+* Computes a normalized demand value in the range `[0,1]`
+* Allocates node CPU proportionally across pods
+* Writes desired allocations to the Kubernetes API
+
+The agent has:
+
+* No network services
+* No custom protocols
+* No external dependencies
+
+---
+
+### 2. PodAllocation Custom Resource (CRD)
+
+`PodAllocation` is the system’s **authoritative declaration** of CPU decisions.
+
+* One object per pod
+* Declares desired CPU limit
+* Records application status and timestamps
+* Owned exclusively by the system (not users)
+
+CRDs are used only to store **decisions and state**, not raw metrics or time series.
+
+---
+
+### 3. Controller and Actuator
+
+A Kubernetes controller:
+
+* Watches `PodAllocation` resources
+* Compares desired vs actual pod resources
+* Applies changes using the `pods/resize` subresource
+* Enforces safety rules (cooldowns, step limits)
+* Updates status and emits events
+
+The actuator logic is isolated and reusable, ensuring clean separation between **decision-making** and **enforcement**.
+
+---
+
+## Market-Based Allocation Model
+
+MBCAS implements a **Fisher-market-inspired allocation rule**:
+
+* Each pod implicitly “bids” through observed pressure
+* CPU is allocated proportionally to demand
+* Total allocation is constrained by node capacity
+
+Formally, the mechanism approximates:
+
+```
+maximize   Σ log(cpu_i)
+subject to Σ cpu_i ≤ C
 ```
 
-#### Required Flags
+This corresponds to **proportional fairness** and **Nash Social Welfare maximization**, providing:
 
-- `-pod`: Pod name (required)
+* Pareto efficiency
+* Fairness under contention
+* No starvation
+* Stable convergence
 
-#### Resource Flags
-
-- `-cpu`: New CPU value (e.g., `250m`, `1`, `0.5`)
-- `-memory`: New memory value (e.g., `512Mi`, `1Gi`)
-
-At least one of `-cpu` or `-memory` must be specified.
-
-#### Policy Flags
-
-- `-policy`: Resize policy (default: `both`)
-  - `both`: Set both requests and limits to the same value (default, backward compatible)
-  - `limits`: Set only limits, leaving requests unchanged
-  - `requests`: Set only requests, leaving limits unchanged
-
-#### Wait Flags
-
-- `-wait`: Wait for resize to complete before returning (default: `false`)
-- `-wait-timeout`: Maximum time to wait for resize completion (default: `30s`)
-- `-poll`: Poll interval when waiting for resize (default: `500ms`)
-
-#### Other Flags
-
-- `-namespace`: Pod namespace (default: `default`)
-- `-container`: Container name (optional, defaults to first container)
-- `-dry-run`: Show planned changes without applying them
-
-### Examples
-
-**Basic resize (both requests and limits):**
-```bash
-k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -memory 256Mi
-```
-
-**Resize limits only:**
-```bash
-k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -policy limits
-```
-
-**Dry-run to preview changes:**
-```bash
-k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -dry-run
-```
-
-**Wait for resize to complete:**
-```bash
-k8s-pod-tool update -namespace default -pod my-pod -cpu 500m -wait -wait-timeout 60s
-```
-
-**Resize specific container:**
-```bash
-k8s-pod-tool update -namespace default -pod my-pod -container app -cpu 500m
-```
-
-### Error Handling
-
-The CLI provides enhanced error messages with actionable hints:
-
-- **RBAC errors**: "check RBAC: you need 'patch' permission on 'pods/resize' subresource"
-- **Feature gate missing**: "enable InPlacePodVerticalScaling feature gate on your cluster"
-- **Invalid quantities**: "verify quantities/policy and runtime support for in-place resize"
-- **Container not found**: Clear error message with container name
-
-### Prerequisites
-
-- Kubernetes cluster with `InPlacePodVerticalScaling` feature gate enabled
-- Kubernetes version 1.27 or later
-- RBAC permissions to patch `pods/resize` subresource
+Crucially, bids are **revealed through behavior**, making the mechanism naturally incentive-compatible.
 
 ---
 
-## System architecture
+## Relationship to Kubernetes Autoscalers
 
-```text
-   ┌───────────────────────────────┐
-   │     Demand Agents (Pods)      │
-   │  local metrics → demand report│
-   └──────────────┬────────────────┘
-                  │ demand reports
-                  ▼
-   ┌─────────────────────────────────────────────┐
-   │            Market Controller (Go)           │
-   │                                             │
-   │  1) Discover budgets (annotations/CRD)      │
-   │  2) Aggregate demand per node               │
-   │  3) Compute effective bids (enforced)       │
-   │  4) Clear per-node CPU markets              │
-   │  5) Apply guardrails (floors/caps/cooldowns)│
-   │  6) Actuate via pods/resize                 │
-   └──────────────┬──────────────────────────────┘
-                  │ resize patches
-                  ▼
-   ┌─────────────────────────────────────────────┐
-   │           Kubernetes API Server             │
-   │             (pods/resize)                   │
-   └──────────────┬──────────────────────────────┘
-                  ▼
-   ┌─────────────────────────────────────────────┐
-   │               Worker Nodes                  │
-   │           kubelet applies resize            │
-   └─────────────────────────────────────────────┘
+MBCAS does not extend HPA or VPA.
+
+Instead:
+
+* Kubernetes remains responsible for **placement**
+* MBCAS takes responsibility for **continuous CPU allocation**
+
+Conceptually, MBCAS behaves like a **kernel-aware vertical autoscaler**, but without:
+
+* user-defined targets
+* historical profiling
+* external metrics dependencies
+
+---
+
+## Stability and Safety Considerations
+
+The system explicitly addresses known risks:
+
+* **Oscillation control** via smoothing, hysteresis, and rate limits
+* **Pod lifecycle shocks** handled through warm-up periods and CPU reserves
+* **QoS preservation** by mutating limits only and respecting Guaranteed pods
+* **Fairness policies** layered over raw pressure signals
+* **Ineffective scaling detection** when CPU does not improve progress
+
+These measures ensure stable behavior under real-world workloads.
+
+---
+
+## Design Principles
+
+* System-owned (no user configuration)
+* Kernel-informed (pressure over utilization)
+* Kubernetes-native (CRDs and controllers)
+* Minimal operational overhead
+* Market-based and fairness-aware
+* Academically grounded and practically deployable
+
+---
+
+## Project Status
+
+Current focus:
+
+* Core actuator implementation
+* Architecture and mechanism definition
+* Transition to a fully Kubernetes-native control loop
+
+Planned future work:
+
+* Formal stability analysis
+* Comparative evaluation against HPA/VPA
+* Scalability experiments
+* Sensitivity analysis of allocation policies
+
+---
+
+## Summary
+
+MBCAS explores a shift from **declared intent** to **observed reality** in microservices resource management.
+By grounding coordination in kernel-level pressure and enforcing decisions through Kubernetes-native mechanisms, the project demonstrates how **market-based, agent-oriented models** can be applied to real distributed systems to improve efficiency, fairness, and stability.
+
+
