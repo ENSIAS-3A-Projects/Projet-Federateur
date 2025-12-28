@@ -1,0 +1,37 @@
+# Binaries
+# Binaries
+*.exe
+agent.exe
+controller.exe
+*.out
+*.bin
+node-agent
+sidecar-agent
+k8s-pod-tool
+
+# Go build artifacts
+/dist/
+/bin/
+*.test
+*.prof
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Generated protobuf files (if regenerated)
+# pkg/transport/grpc/proto/*.pb.go
+# pkg/transport/grpc/proto/*_grpc.pb.go
+
+

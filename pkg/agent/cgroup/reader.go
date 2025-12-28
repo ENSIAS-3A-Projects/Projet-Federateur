@@ -1,0 +1,194 @@
+package cgroup
+
+// Package cgroup implements reading of cgroup v2 statistics for pods.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+)
+
+const (
+	// CgroupV2BasePath is the base path for cgroup v2.
+	CgroupV2BasePath = "/sys/fs/cgroup"
+
+	// CPUStatFile is the filename for CPU statistics in cgroup v2.
+	CPUStatFile = "cpu.stat"
+)
+
+// PodSample holds a sample of pod cgroup statistics.
+type PodSample struct {
+	Timestamp     time.Time
+	ThrottledTime int64 // microseconds
+	UsageTime     int64 // microseconds
+}
+
+// Reader reads cgroup statistics for pods.
+// ReadPodDemand is safe for concurrent use (protected by mu).
+type Reader struct {
+	mu      sync.RWMutex
+	// Last samples per pod (for delta calculation)
+	samples map[string]*PodSample
+}
+
+// NewReader creates a new cgroup reader.
+func NewReader() (*Reader, error) {
+	// Verify cgroup v2 is available
+	if _, err := os.Stat(CgroupV2BasePath); err != nil {
+		return nil, fmt.Errorf("cgroup v2 not available at %s: %w", CgroupV2BasePath, err)
+	}
+
+	return &Reader{
+		samples: make(map[string]*PodSample),
+		mu:      sync.RWMutex{},
+	}, nil
+}
+
+// ReadPodDemand reads the demand signal for a pod from its cgroup.
+// Returns a normalized demand value in [0, 1] based on throttling ratio.
+//
+// Phase 3: Uses cgroup throttling ratio only (PSI not yet integrated).
+// The demand is computed at pod level (pod-level cgroup).
+// For multi-container pods, this aggregates across containers implicitly.
+//
+// Thread-safe: protected by internal mutex.
+func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
+	cgroupPath, err := r.findPodCgroupPath(pod)
+	if err != nil {
+		return 0.0, fmt.Errorf("find cgroup path: %w", err)
+	}
+
+	// Read current CPU statistics
+	sample, err := r.readCPUSample(cgroupPath)
+	if err != nil {
+		return 0.0, fmt.Errorf("read CPU sample: %w", err)
+	}
+
+	// Calculate delta from last sample (with mutex protection)
+	key := string(pod.UID)
+	
+	r.mu.Lock()
+	lastSample := r.samples[key]
+	
+	var demand float64
+	if lastSample != nil {
+		// Compute throttling ratio: delta throttled / delta usage
+		deltaThrottled := sample.ThrottledTime - lastSample.ThrottledTime
+		deltaUsage := sample.UsageTime - lastSample.UsageTime
+
+		if deltaUsage > 0 {
+			// Throttling ratio: how much time was throttled vs used
+			throttlingRatio := float64(deltaThrottled) / float64(deltaUsage)
+
+			// Normalize to [0, 1] range
+			// Threshold: 0.1 (10% throttling) = 1.0 demand
+			threshold := 0.1
+			demand = throttlingRatio / threshold
+			if demand > 1.0 {
+				demand = 1.0
+			}
+			if demand < 0.0 {
+				demand = 0.0
+			}
+		} else {
+			// No usage delta, no demand signal
+			demand = 0.0
+		}
+	} else {
+		// First sample, no demand yet
+		demand = 0.0
+	}
+
+	// Store sample for next delta calculation
+	r.samples[key] = sample
+	r.mu.Unlock()
+
+	return demand, nil
+}
+
+// findPodCgroupPath finds the cgroup path for a pod.
+// Supports cgroup v2 with kubelet conventions.
+func (r *Reader) findPodCgroupPath(pod *corev1.Pod) (string, error) {
+	// Try common cgroup v2 patterns
+	patterns := []string{
+		// Pattern: kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<podUID>.slice
+		fmt.Sprintf("kubepods.slice/kubepods-*.slice/kubepods-*-pod%s.slice", string(pod.UID)),
+		// Pattern: kubepods/kubepods-<qos>/kubepods-<qos>-pod<podUID>
+		fmt.Sprintf("kubepods/kubepods-*/kubepods-*-pod%s", string(pod.UID)),
+	}
+
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(CgroupV2BasePath, pattern))
+		if err != nil {
+			continue
+		}
+		if len(matches) > 0 {
+			// Verify it has cpu.stat
+			cpuStatPath := filepath.Join(matches[0], CPUStatFile)
+			if _, err := os.Stat(cpuStatPath); err == nil {
+				return matches[0], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("cgroup path not found for pod %s", pod.UID)
+}
+
+// readCPUSample reads CPU statistics from a cgroup path.
+func (r *Reader) readCPUSample(cgroupPath string) (*PodSample, error) {
+	cpuStatPath := filepath.Join(cgroupPath, CPUStatFile)
+	data, err := os.ReadFile(cpuStatPath)
+	if err != nil {
+		return nil, fmt.Errorf("read cpu.stat: %w", err)
+	}
+
+	sample := &PodSample{
+		Timestamp: time.Now(),
+	}
+
+	// Parse cpu.stat file
+	// Format: key value (one per line)
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+
+		key := fields[0]
+		value, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+
+		switch key {
+		case "throttled_usec":
+			sample.ThrottledTime = value
+		case "usage_usec":
+			sample.UsageTime = value
+		}
+	}
+
+	return sample, nil
+}
+
+// Cleanup removes samples for pods that no longer exist.
+func (r *Reader) Cleanup(existingPods map[string]bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
+	for key := range r.samples {
+		if !existingPods[key] {
+			delete(r.samples, key)
+			klog.V(5).InfoS("Cleaned up cgroup sample", "podUID", key)
+		}
+	}
+}
+
