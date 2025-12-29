@@ -1,0 +1,33 @@
+# MBCAS Agent Dockerfile
+# Build stage
+FROM golang:1.21-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+
+# Cache dependencies
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build static binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o agent \
+    ./cmd/agent
+
+# Runtime stage
+# Use alpine for debugging capability (can exec into container)
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+# Agent needs root to read cgroups
+# Security is enforced via securityContext in DaemonSet
+
+COPY --from=builder /app/agent /agent
+
+ENTRYPOINT ["/agent"]

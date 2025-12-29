@@ -1,0 +1,49 @@
+# Kind cluster configuration for MBCAS MVP testing
+# Usage: kind create cluster --config=scripts/kind-config.yaml
+#
+# Requirements:
+#   - Kubernetes 1.27+ (feature gate support)
+#   - kubectl 1.32+ (for --subresource=resize)
+#   - Kind node image v1.35.x or later recommended
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: mbcas-test
+
+# Pin Kind node image version for reproducibility
+# Use latest v1.35.x or v1.36.x that supports InPlacePodVerticalScaling
+# To find available versions: docker pull kindest/node:v1.35.0
+# Uncomment and set the image you want to use:
+# image: kindest/node:v1.35.0
+
+# Enable InPlacePodVerticalScaling feature gate
+featureGates:
+  InPlacePodVerticalScaling: true
+
+nodes:
+# Control plane node
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      extraArgs:
+        # Enable pods/resize subresource
+        feature-gates: InPlacePodVerticalScaling=true
+    controllerManager:
+      extraArgs:
+        feature-gates: InPlacePodVerticalScaling=true
+    scheduler:
+      extraArgs:
+        feature-gates: InPlacePodVerticalScaling=true
+  - |
+    kind: KubeletConfiguration
+    featureGates:
+      InPlacePodVerticalScaling: true
+
+# Worker node (where test pods will run)
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    featureGates:
+      InPlacePodVerticalScaling: true

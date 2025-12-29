@@ -117,13 +117,21 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// Normalize desired CPU
 	desiredCPU := pa.Spec.DesiredCPULimit
-	if _, err := resource.ParseQuantity(desiredCPU); err != nil {
+	desiredQty, err := resource.ParseQuantity(desiredCPU)
+	if err != nil {
 		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidDesiredCPU",
 			fmt.Sprintf("Invalid desired CPU quantity %q: %v", desiredCPU, err), nil)
 	}
 
-	// Compare desired vs actual
-	if currentCPU == desiredCPU {
+	// Parse current CPU for comparison
+	currentQty, err := resource.ParseQuantity(currentCPU)
+	if err != nil {
+		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidPodState",
+			fmt.Sprintf("Cannot parse current CPU limit %q: %v", currentCPU, err), nil)
+	}
+
+	// Compare desired vs actual (using quantity comparison, not string)
+	if currentQty.Equal(desiredQty) {
 		// Already applied - update status if needed
 		if pa.Status.Phase != PhaseApplied || pa.Status.AppliedCPULimit != desiredCPU {
 			now := metav1.Now()

@@ -1,0 +1,8 @@
+# MBCAS System Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mbcas-system
+  labels:
+    app.kubernetes.io/name: mbcas
+    app.kubernetes.io/managed-by: kustomize

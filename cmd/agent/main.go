@@ -7,7 +7,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
 
 	"mbcas/pkg/agent"
 )
@@ -24,9 +23,6 @@ func main() {
 			klog.Fatal("--node-name or NODE_NAME environment variable is required")
 		}
 	}
-
-	// Set up logging
-	klog.SetLogger(klogr.New())
 
 	// Get Kubernetes config (in-cluster)
 	config, err := rest.InClusterConfig()

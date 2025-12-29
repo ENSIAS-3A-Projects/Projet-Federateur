@@ -1,8 +1,14 @@
+# MBCAS Agent DaemonSet (FIXED)
+# Changes from original:
+# 1. runAsNonRoot: false (agent needs root for cgroup access)
+# 2. runAsUser: 0 (root)
+# 3. Added SYS_ADMIN capability for cgroup reading
+# 4. Changed namespace to mbcas-system (was 'system')
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: mbcas-agent
-  namespace: system
+  namespace: mbcas-system  # Changed from 'system'
   labels:
     app.kubernetes.io/name: mbcas
     app.kubernetes.io/component: agent
@@ -20,6 +26,12 @@ spec:
       serviceAccountName: mbcas-agent
       hostNetwork: false
       hostPID: false
+      # Tolerate all taints to run on all nodes
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
       containers:
       - name: agent
         image: mbcas-agent:latest
@@ -43,23 +55,22 @@ spec:
         - name: cgroup
           mountPath: /sys/fs/cgroup
           readOnly: true
+        # FIXED: Security context for cgroup access
         securityContext:
+          # Must run as root to read cgroup stats
+          runAsNonRoot: false
+          runAsUser: 0
+          readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: false
-          runAsNonRoot: true
-          runAsUser: 1000
           capabilities:
+            add:
+            - SYS_ADMIN  # Required for cgroup access
             drop:
-            - ALL
+            - NET_RAW
       volumes:
       - name: cgroup
         hostPath:
           path: /sys/fs/cgroup
           type: Directory
-      tolerations:
-      - operator: Exists
-        effect: NoSchedule
-      - operator: Exists
-        effect: NoExecute
 
 
