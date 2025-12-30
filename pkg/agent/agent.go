@@ -42,7 +42,8 @@ const (
 	WriteInterval = 15 * time.Second
 
 	// MinChangePercent is the minimum change required to write an update (hysteresis).
-	MinChangePercent = 10.0
+	// Lowered to 2% to respond faster to demand changes.
+	MinChangePercent = 2.0
 
 	// SystemReservePercent is the percentage of node CPU to reserve for system.
 	SystemReservePercent = 10.0
@@ -289,7 +290,19 @@ func (a *Agent) writeAllocations() error {
 	return nil
 }
 
-// discoverPods discovers all running pods on this node.
+// ManagedLabel is the label that controls MBCAS management.
+const ManagedLabel = "mbcas.io/managed"
+
+// ExcludedNamespaces are namespaces that MBCAS never manages.
+var ExcludedNamespaces = map[string]bool{
+	"kube-system":     true,
+	"kube-public":     true,
+	"kube-node-lease": true,
+	"mbcas-system":    true,
+}
+
+// discoverPods discovers all running pods on this node that MBCAS should manage.
+// Implements "manage everyone" with namespace and label exclusions.
 func (a *Agent) discoverPods() ([]*corev1.Pod, error) {
 	// List all pods, filtered by nodeName
 	podList, err := a.k8sClient.CoreV1().Pods("").List(a.ctx, metav1.ListOptions{
@@ -299,17 +312,29 @@ func (a *Agent) discoverPods() ([]*corev1.Pod, error) {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
 
-	// Filter to running pods only
+	// Filter to running, managed pods only
 	var pods []*corev1.Pod
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if pod.Status.Phase == corev1.PodRunning {
-			// Skip system pods (optional, but recommended)
-			if pod.Namespace == "kube-system" {
-				continue
-			}
-			pods = append(pods, pod)
+
+		// Skip non-running pods
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
 		}
+
+		// Skip excluded namespaces (kube-system, mbcas-system, etc.)
+		if ExcludedNamespaces[pod.Namespace] {
+			klog.V(5).InfoS("Skipping pod in excluded namespace", "pod", pod.Name, "namespace", pod.Namespace)
+			continue
+		}
+
+		// Skip pods with explicit opt-out label
+		if val, ok := pod.Labels[ManagedLabel]; ok && val == "false" {
+			klog.V(5).InfoS("Skipping pod with opt-out label", "pod", pod.Name, "namespace", pod.Namespace)
+			continue
+		}
+
+		pods = append(pods, pod)
 	}
 
 	return pods, nil

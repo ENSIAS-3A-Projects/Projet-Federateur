@@ -39,7 +39,6 @@ spec:
         command:
         - /agent
         - --node-name=$(NODE_NAME)
-        - -v=5
         env:
         - name: NODE_NAME
           valueFrom:

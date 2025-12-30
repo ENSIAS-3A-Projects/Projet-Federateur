@@ -1,0 +1,49 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+# PodAllocation CRD permissions
+- apiGroups:
+  - allocation.mbcas.io
+  resources:
+  - podallocations
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - allocation.mbcas.io
+  resources:
+  - podallocations/status
+  verbs:
+  - get
+  - update
+  - patch
+# Pod permissions (for reading and resizing)
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/resize
+  verbs:
+  - patch
+# Event permissions
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+
+

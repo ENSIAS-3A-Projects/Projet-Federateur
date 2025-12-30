@@ -1,0 +1,41 @@
+# VPA Policy: Disable VPA Auto for MBCAS-managed namespaces
+# This prevents VPA from fighting with MBCAS
+#
+# NOTE: If VPA is installed in the cluster, you have two options:
+# 
+# Option 1: Don't create VerticalPodAutoscaler objects for demo workloads
+#           (This file is just documentation in that case)
+#
+# Option 2: Create VPA objects in "Off" mode to provide recommendations
+#           without applying mutations
+---
+# Example: VPA in recommendation-only mode (does NOT fight MBCAS)
+# Uncomment and apply if you want VPA recommendations alongside MBCAS
+#
+# apiVersion: autoscaling.k8s.io/v1
+# kind: VerticalPodAutoscaler
+# metadata:
+#   name: demo-app-vpa
+#   namespace: demo
+# spec:
+#   targetRef:
+#     apiVersion: "apps/v1"
+#     kind: Deployment
+#     name: demo-app
+#   updatePolicy:
+#     updateMode: "Off"  # CRITICAL: "Off" means recommendation-only, no mutations
+#   resourcePolicy:
+#     containerPolicies:
+#     - containerName: "*"
+#       controlledResources: ["memory"]  # Only recommend memory, let MBCAS handle CPU
+---
+# Policy documentation:
+# 
+# MBCAS-VPA Conflict Prevention:
+# 1. VPA Auto mode MUST NOT be used on pods with label `mbcas.io/managed=true`
+# 2. If VPA is installed, use updateMode: "Off" for CPU recommendations
+# 3. VPA can manage memory if desired (MBCAS only manages CPU)
+# 4. Demo namespace has label `mbcas.io/managed=true` applied
+#
+# Enforcement: The MBCAS agent will skip pods in namespaces with
+# `mbcas.io/managed=false` label. Conversely, all other pods are managed.

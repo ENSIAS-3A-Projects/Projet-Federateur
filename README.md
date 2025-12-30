@@ -1,299 +1,309 @@
+# MBCAS — Market-Based CPU Allocation System
 
-
-# MBCAS — Market-Based CPU Allocation System for Kubernetes
-
-**Status:** MVP-ready (80% complete)  
-**Latest:** End-to-end deployment tested on Minikube/Kind  
-**Contributors:** Benabbou Imane, Bouazza Imane, Alaoui Sosse Saad, Taqi Mohamed Chadi
+**Demo-Ready | CPU-Only | Manages Everyone**
 
 ---
 
-## What Is This?
+## Scope & Constraints
 
-**MBCAS** is a **Kubernetes-native CPU allocation system** that automatically and fairly distributes CPU resources among pods based on real kernel pressure signals—**without any user configuration, external metrics systems, or application changes**.
+MBCAS is a **Kubernetes-native demo** that automatically distributes CPU resources among pods using game theory (Fisher market proportional fairness). This is an **educational/evaluation system**, not production-ready.
 
-Instead of asking "how much CPU should this pod get?", MBCAS observes **what the kernel is telling us** about CPU demand (via cgroup throttling) and automatically adjusts pod CPU limits to match actual need. It's like a thermostat for Kubernetes CPU: measure pressure → adjust limits → stabilize.
+### What This Demo Does
 
-**How it's different from Kubernetes HPA/VPA:**
-- ❌ HPA/VPA need user annotations and external metrics pipelines (Prometheus)
-- ✅ MBCAS reads kernel signals directly (no external dependencies)
-- ✅ MBCAS reacts in seconds (not minutes)
-- ✅ MBCAS uses game theory to ensure fairness (proportional fairness allocation)
-- ✅ MBCAS requires zero configuration
+| Capability | Status | Notes |
+|------------|--------|-------|
+| **CPU-only management** | ✅ | Memory limits are not touched |
+| **Manage all pods by default** | ✅ | LimitRange ensures CPU bounds exist |
+| **In-place pod resizing** | ✅ | Uses Kubernetes Alpha feature gate |
+| **Proportional fairness** | ✅ | Game theory market solver |
+| **Real kernel signals** | ✅ | Reads cgroup v2 throttling |
+| **Zero configuration** | ✅ | Just deploy and it works |
 
----
+### What This Demo Does NOT Do
 
-## Why Should I Care?
+| Non-Goal | Reason |
+|----------|--------|
+| **Production stability** | Alpha feature gates, limited testing |
+| **Memory management** | Out of scope — CPU-only design |
+| **Multi-cluster support** | Single cluster demo only |
+| **Persist intent to manifests** | Ephemeral resizes only (see below) |
+| **CRI-O compatibility** | Cgroup path detection is containerd-specific |
 
-### The Problem MBCAS Solves
+### Ephemeral vs Persistent Resizing
 
-Your Kubernetes cluster struggles with:
-- **CPU overprovisioning** — you're reserved 4 cores but only use 1.5 cores consistently
-- **Throttling under load** — brief traffic spikes cause cascading timeouts
-- **Operational complexity** — tuning HPA/VPA targets is tedious and error-prone
-- **Slow reaction time** — autoscalers react to historical metrics, not live pressure
-- **Unfair resource allocation** — without a fairness mechanism, aggressive services starve others
+**MBCAS uses ephemeral resizing only:**
+- ✅ CPU limit changes apply to **running pods**
+- ⚠️ Pod restarts **revert to manifest values**
+- ⚠️ Horizontal scaling (new replicas) **use manifest values**
 
-### What MBCAS Provides
+This is intentional for the demo. Persisting intent would require:
+1. Writing back to GitOps manifests (violates declarative model)
+2. Or storing "desired" state in CRD (adds complexity)
 
-✅ **Automatic CPU allocation** based on real demand (kernel throttling ratio)  
-✅ **Fairness guarantee** — no pod starves, load shared proportionally to demand  
-✅ **Fast reaction** — measures and adjusts every 15 seconds  
-✅ **Zero configuration** — just deploy and it works  
-✅ **No application changes** — works with any containerized workload  
-✅ **Kubernetes-native** — uses CRDs, controllers, and in-place pod resizing  
-
-### Use Cases
-
-- **Multi-tenant clusters** where CPU fairness is critical
-- **Bursty workloads** (batch jobs + always-on services) sharing nodes
-- **Cost optimization** — run more pods per node by autoscaling CPU dynamically
-- **Dev/test environments** — automatic resource tuning without manual tweaking
-- **Mission-critical services** — avoid throttling surprises
+For this demo, the ephemeral model is sufficient to demonstrate the market-based allocation algorithm.
 
 ---
 
-## Is It Usable or Experimental?
+## Prerequisites
 
-### ✅ Usable (MVP Ready)
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| **Windows 10/11** | Any | PowerShell 5.1+ |
+| **Minikube** | v1.32+ | [Install guide](https://minikube.sigs.k8s.io/docs/start/) |
+| **kubectl** | v1.27+ | [Install guide](https://kubernetes.io/docs/tasks/tools/) |
+| **Docker Desktop** | Latest | Required for Minikube driver |
 
-**MBCAS is deployment-ready for testing.** All components are implemented and tested:
+### Feature Gate Requirement
 
-| Component | Status | Proof |
-|-----------|--------|-------|
-| **Kernel signal reader** (cgroup throttling) | ✅ Implemented & tested | `pkg/agent/cgroup/reader.go` (195 lines) |
-| **Demand tracking** (EMA smoothing) | ✅ Implemented & tested | `pkg/agent/demand/tracker.go` (43 lines) |
-| **Market solver** (proportional fairness) | ✅ Implemented & tested | `pkg/allocation/market.go` + 529 test lines |
-| **Kubernetes controller** (reconciliation loop) | ✅ Implemented & tested | `pkg/controller/podallocation_controller.go` (357 lines) |
-| **Pod resizer** (in-place scaling) | ✅ Implemented & tested | `pkg/actuator/actuator.go` + 655 test lines |
-| **Deployment artifacts** | ✅ Complete | Dockerfiles, manifests, RBAC, scripts |
-| **CLI tool** | ✅ Implemented | `main.go` + `pkg/podtool/` for manual testing |
-
-**Unit test coverage:** ~1,200 test lines (49% test-to-code ratio for infrastructure code)
-
-### ⚠️ Experimental (Limitations)
-
-**Not recommended for production clusters without validation:**
-
-- **Tested on:** Minikube, Kind clusters
-- **Not yet tested on:** EKS, GKE, large multi-node clusters (>10 nodes)
-- **Single metric:** Uses only CPU throttling; PSI integration planned
-- **Cgroup path detection:** Uses glob patterns (may fail on CRI-O, containerd variants)
-- **Performance:** Sequential pod discovery (scales OK up to ~100 pods/node)
-
-**Mitigation:** MVP is fully functional for demonstration and evaluation. Production deployment requires:
-1. Load testing on target Kubernetes distribution
-2. Multi-node validation (DaemonSet runs on all nodes)
-3. Validation of cgroup path detection on your CRI
-4. Optional: PSI integration if memory pressure matters
+MBCAS requires the **InPlacePodVerticalScaling** Alpha feature gate (Kubernetes 1.27+). The demo script enables this automatically via Minikube configuration.
 
 ---
 
-## How Do I Run It?
+## Demo Execution Order
 
-### Prerequisites
+Run scripts in sequence from PowerShell:
 
-- **Kubernetes cluster** (v1.27+) with `InPlacePodVerticalScaling` feature gate enabled
-- **kubectl** (v1.32+ recommended for `--subresource=resize` CLI support)
-- For testing: **Minikube** or **Kind**
+```powershell
+cd "c:\Users\achra\Desktop\Game Theory"
 
-### Quick Start (Minikube)
+# Step 1: Create cluster with feature gates and policies
+.\scripts\01-start-cluster.ps1
 
-```bash
-# 1. Clone and navigate
-cd mbcas
+# Step 2: Build and deploy MBCAS components
+.\scripts\02-deploy-mbcas.ps1
 
-# 2. One-command deploy (sets up cluster, builds, deploys, runs tests)
-bash scripts/mvp-test.sh all
+# Step 3: Deploy UrbanMoveMS microservices stack
+.\scripts\03-deploy-urbanmove.ps1
 
-# On Windows PowerShell:
-.\scripts\mvp-test.ps1 all
+# Step 4: Generate CPU load on services
+.\scripts\04-generate-load.ps1
+
+# Step 5: Watch MBCAS react (live dashboard)
+.\scripts\05-monitor-scaling.ps1
+
+# Cleanup when done
+.\scripts\cleanup.ps1        # Remove demo resources
+.\scripts\cleanup.ps1 -All   # Also delete cluster
 ```
 
-This script:
-- ✅ Creates Minikube cluster with feature gate enabled
-- ✅ Builds Docker images (controller + agent)
-- ✅ Loads images into Minikube
-- ✅ Deploys MBCAS (CRD, RBAC, controller, agent)
-- ✅ Deploys test workload (nginx)
-- ✅ Shows verification commands
+### Script Summary
 
-**Expected runtime:** ~3-5 minutes
+| Script | Duration | Purpose |
+|--------|----------|---------|
+| `01-start-cluster.ps1` | 2-5 min | Create Minikube cluster, enable feature gate, apply LimitRange |
+| `02-deploy-mbcas.ps1` | 1-2 min | Build Docker images, deploy CRD + RBAC + controller + agent |
+| `03-deploy-urbanmove.ps1` | 3-5 min | Build microservices images, deploy full UrbanMoveMS stack |
+| `04-generate-load.ps1` | 1 min | Start CPU stress on services |
+| `05-monitor-scaling.ps1` | Ongoing | Live dashboard showing CPU usage and MBCAS decisions |
+| `cleanup.ps1` | 30 sec | Remove all demo resources |
 
-### Verify Deployment
+---
 
-```bash
-# 1. Check components
-kubectl -n mbcas-system get pods
-# Output: mbcas-controller (Deployment) + mbcas-agent (DaemonSet on each node)
+## What the Demo Proves
 
-# 2. Watch allocations appear
-kubectl get podallocations -A -o wide
-# Output: Pod UUID, namespace, pod name, desired CPU, applied CPU, status
+### ✅ Successfully Demonstrates
 
-# 3. Monitor controller
-kubectl -n mbcas-system logs deploy/mbcas-controller -f
-# Look for: "Updated PodAllocation" events
+1. **Automatic CPU detection** — MBCAS reads cgroup throttling signals without user configuration
+2. **Fair allocation** — Under contention, CPU is distributed proportionally to demand
+3. **In-place resizing** — Pod CPU limits change without restart
+4. **Real-time reaction** — Allocation decisions happen in ~15 second cycles
+5. **LimitRange integration** — Pods without limits get defaults and become manageable
+6. **Multi-service scaling** — MBCAS fairly distributes CPU across independent microservices
 
-# 4. Monitor agent
-kubectl -n mbcas-system logs ds/mbcas-agent -f
-# Look for: "Pod demand sample" entries
+### Expected Demo Output
+
+When running `05-monitor-scaling.ps1` with UrbanMoveMS under load:
+
+```
+========================================
+  MBCAS Live Monitor - Press Ctrl+C to stop
+========================================
+
+POD               NAMESPACE   REQUEST    LIMIT      CPU_USAGE   ALLOCATION
+bus-service-...   urbanmove   100m       500m       450m        ↑ 600m
+ticket-service-..  urbanmove   100m       500m       200m        → 500m
+gateway-...       urbanmove   100m       500m       490m        ↑ 700m
+
+PodAllocations (urbanmove namespace):
+bus-service-...   urbanmove   600m       (pending)
+ticket-service-..  urbanmove   500m       (applied)
+gateway-...       urbanmove   700m       (applied)
 ```
 
-### Deploy Your Own Workload
+**Key observations:**
+- Multiple services competing for CPU are fairly allocated
+- Services with higher demand get higher allocations
+- Allocations rebalance in ~15s cycles as demand changes
+- No service starves (proportional fairness guarantee)
 
-```bash
-# Deploy any microservice
-kubectl apply -f your-app.yaml
+---
 
-# MBCAS will automatically:
-# 1. Discover the pod
-# 2. Read its CPU throttling
-# 3. Compute fair allocation
-# 4. Create/update PodAllocation CRD
-# 5. Apply in-place CPU limit changes
+## Known Limitations (Honest)
 
-# Monitor your pod's CPU limit changing
-watch -n 2 "kubectl get pod <name> -o jsonpath='{.spec.containers[0].resources.limits.cpu}'"
+### Critical Limitations
+
+| Limitation | Impact | Mitigation |
+|------------|--------|------------|
+| **Alpha feature gate** | May change in future K8s versions | Pin to K8s 1.27-1.31 |
+| **Containerd-only cgroup paths** | Won't work with CRI-O | Use containerd runtime |
+| **Single-node demo** | Not validated on multi-node | Use single-node Minikube |
+| **Metrics-server race** | May take 30s after pod start | Script waits for readiness |
+
+### Design Limitations
+
+| Limitation | Reason | Future Work |
+|------------|--------|-------------|
+| **CPU-only** | Memory resizing has different dynamics | Add memory support |
+| **No PSI integration** | Linux 4.20+ pressure metrics not used | Roadmap item |
+| **Guaranteed QoS hardcoded** | Cannot resize pods with requests=limits | Policy-driven in future |
+| **No persistence** | Restarts revert to manifests | GitOps integration possible |
+
+### Known Failure Modes
+
+1. **Pod discovery fails** — If cgroup paths don't match glob patterns
+2. **Resize fails** — If pod doesn't support in-place resizing (RestartPolicy)
+3. **Allocation stale** — If PodAllocation CRD is orphaned after pod deletion
+4. **Node pressure** — If total demand > node capacity (allocation is capped)
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Kubernetes Node                          │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                  MBCAS Agent (DaemonSet)              │  │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  │  │
+│  │  │ cgroup      │→ │ Demand       │→ │ Market      │  │  │
+│  │  │ Reader      │  │ Tracker      │  │ Solver      │  │  │
+│  │  │ (throttle)  │  │ (EMA smooth) │  │ (fairness)  │  │  │
+│  │  └─────────────┘  └──────────────┘  └─────────────┘  │  │
+│  │                           │                           │  │
+│  │                           ▼                           │  │
+│  │                  PodAllocation CRD                    │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                             │                                │
+│                             ▼                                │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │              MBCAS Controller (Deployment)            │  │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  │  │
+│  │  │ Watch       │→ │ Validate     │→ │ Apply       │  │  │
+│  │  │ CRD changes │  │ Safety       │  │ Resize      │  │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Create Real CPU Contention (to see MBCAS in action)
+**Data Flow:**
+1. Agent reads cgroup throttling (`/sys/fs/cgroup/...`)
+2. Demand tracker smooths signals with EMA
+3. Market solver computes fair allocation
+4. Agent writes `PodAllocation` CRD
+5. Controller watches CRD changes
+6. Controller validates safety (cooldown, max step)
+7. Controller applies resize via `PATCH /pods/{name}/resize`
 
-```bash
-# Option 1: Send load to your microservice
-ab -n 10000 -c 100 http://your-service
+---
 
-# Option 2: Reduce initial CPU limit to trigger throttling
-kubectl set resources deployment/your-app --limits=cpu=100m
+## Directory Structure
 
-# Option 3: Deploy a CPU hog on same node
-kubectl run cpu-burn --image=progrium/stress --requests=cpu=1 -- --cpu 1
+```
+mbcas/
+├── scripts/                    # PowerShell demo scripts
+│   ├── 01-start-cluster.ps1    # Cluster bootstrap
+│   ├── 02-deploy-mbcas.ps1     # MBCAS deployment
+│   ├── 03-deploy-demo-app.ps1  # Demo workloads
+│   ├── 04-generate-load.ps1    # Load generation
+│   ├── 05-monitor-scaling.ps1  # Live monitoring
+│   └── cleanup.ps1             # Cleanup
+├── k8s/                        # Kubernetes manifests
+│   ├── mbcas/                  # MBCAS components
+│   │   ├── namespace.yaml
+│   │   ├── crd.yaml
+│   │   ├── rbac.yaml
+│   │   ├── controller-deployment.yaml
+│   │   └── agent-daemonset.yaml
+│   ├── policy/                 # Cluster policies
+│   │   ├── limitrange-default.yaml
+│   │   ├── namespace-demo.yaml
+│   │   └── namespace-exclusions.yaml
+│   └── vpa/                    # VPA conflict prevention
+│       └── vpa-policy.yaml
+├── pkg/                        # Go source code
+│   ├── agent/                  # Node-level components
+│   ├── controller/             # Cluster-level reconciler
+│   ├── allocation/             # Market solver
+│   └── actuator/               # Pod resize operations
+├── api/v1alpha1/               # CRD types
+└── cmd/                        # Entrypoints
 ```
 
 ---
 
-## How Does It Work? (60-second version)
+## Troubleshooting
 
-```
-1. Agent (DaemonSet)
-   → Reads pod's cgroup throttling ratio every 1 second
-   → Smooths the signal (EMA: fast up, slow down)
-   → Every 15s, computes fair allocation using Fisher-market algorithm
-   → Writes PodAllocation CRD
+### Cluster won't start
 
-2. Controller (Deployment)
-   → Watches PodAllocation changes
-   → Compares desired CPU vs actual pod limit
-   → Applies safety rules (cooldown 30s, step limit 1.5x)
-   → Calls pods/resize subresource to update limit
+```powershell
+# Check Minikube status
+minikube status -p mbcas
 
-3. Pod Container
-   → Limit is updated in-place (no restart)
-   → If limit increases → more CPU available
-   → If limit decreases → kernel enforces new cap
+# Check Docker is running
+docker ps
 
-Result: Automatic, fair, stable CPU allocation without user config
+# Delete and recreate
+minikube delete -p mbcas
+.\scripts\01-start-cluster.ps1
 ```
 
----
+### MBCAS agent not running
 
-## Key Files to Understand
+```powershell
+# Check agent logs
+kubectl logs -n mbcas-system daemonset/mbcas-agent
 
-| File | Purpose |
-|------|---------|
-| `pkg/agent/agent.go` | Main agent loop (sampling, writing) |
-| `pkg/agent/cgroup/reader.go` | Kernel throttling signal reader |
-| `pkg/allocation/market.go` | Fisher-market solver (proportional fairness) |
-| `pkg/controller/podallocation_controller.go` | Reconciliation loop |
-| `pkg/actuator/actuator.go` | In-place pod resizing library |
-| `api/v1alpha1/podallocation_types.go` | CRD definition |
-| `config/` | Kubernetes manifests (deployment, daemonset, RBAC) |
-| `scripts/mvp-test.sh` | End-to-end deployment script |
-| `COMPLETE_CODEBASE_ANALYSIS.md` | Detailed technical analysis (80+ pages) |
+# Common issue: cgroup path detection
+# Agent expects /sys/fs/cgroup/kubepods.slice/...
+```
 
----
+### Pods not being managed
 
-## Deployment Readiness Checklist
+```powershell
+# Check LimitRange is applied
+kubectl get limitrange -n demo
 
-| Item | Status |
-|------|--------|
-| Core implementation (agent, controller, actuator, market) | ✅ 100% |
-| Unit tests | ✅ 100% |
-| Docker images (controller, agent) | ✅ Ready |
-| Kubernetes manifests (all files) | ✅ Complete |
-| RBAC configuration | ✅ Correct |
-| Deployment scripts (bash + PowerShell) | ✅ Functional |
-| Documentation | ✅ Comprehensive |
-| MVP deployment tested | ✅ Minikube/Kind |
-| Production load testing | ⚠️ Not yet |
-| Multi-node scalability testing | ⚠️ Not yet |
+# Check pod has CPU limits
+kubectl get pod <name> -n demo -o jsonpath='{.spec.containers[*].resources}'
 
----
+# Check PodAllocation CRDs
+kubectl get podallocations -n demo
+```
 
-## Known Limitations & Future Work
+### Resize not happening
 
-### Limitations
-- **Single metric:** CPU throttling only (PSI integration planned)
-- **Cgroup detection:** Uses glob patterns (may need tuning for some CRIs)
-- **Pod discovery:** Sequential API calls (OK for MVP, optimized for scale later)
-- **Tested platforms:** Minikube, Kind (untested on EKS, GKE, Rancher)
+```powershell
+# Check controller logs
+kubectl logs -n mbcas-system deployment/mbcas-controller
 
-### Planned Enhancements
-- PSI (Pressure Stall Information) for memory awareness
-- Informer-based pod discovery (faster, lower API load)
-- PriorityClass weighting for weighted fairness
-- Metrics endpoint (Prometheus integration)
-- Multi-container pod support
-- Predictive demand (ML-based)
+# Check feature gate is enabled
+kubectl get --raw /apis/admission.k8s.io/v1/mutatingwebhookconfigurations
+```
 
 ---
 
 ## References
 
-**Game Theory Concepts:**
-- Fisher markets and proportional fairness
-- Nash Social Welfare maximization
-- See: `game_theory_concepts_simple.md` & `game_theory_for_microservices.md`
-
-**Academic Context:**
-- Projet Fédérateur: "Collaborative strategies in microservices using game theory"
-- MBCAS demonstrates practical application of game-theoretic resource coordination
-
-**Kubernetes Features Used:**
-- CRDs (Custom Resource Definitions) — for PodAllocation state
-- Controller-Runtime — for reconciliation loop
-- In-place pod resizing (`pods/resize` subresource) — Kubernetes 1.27+
-- DaemonSet + cgroup v2 access — for node agent
+- [Kubernetes In-Place Pod Vertical Scaling](https://kubernetes.io/docs/concepts/configuration/resize-pod-cpu-memory/)
+- [Fisher Market Proportional Fairness](https://en.wikipedia.org/wiki/Fisher_market)
+- [cgroups v2 CPU Controller](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html#cpu)
+- [KEP-1287: In-Place Update of Pod Resources](https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/1287-in-place-update-pod-resources)
 
 ---
 
-## Quick Troubleshooting
+## Contributors
 
-| Problem | Solution |
-|---------|----------|
-| `pods/resize` not found | Ensure `InPlacePodVerticalScaling=true` feature gate. Use `mvp-test.sh` to create cluster correctly. |
-| Agent can't read cgroups | Check security context: agent needs root + SYS_ADMIN capability. Verify cgroup v2 available (`/sys/fs/cgroup`). |
-| No PodAllocation objects created | Check agent logs: `kubectl -n mbcas-system logs ds/mbcas-agent`. Verify pods are running on the node. |
-| Controller not resizing pods | Check controller logs: `kubectl -n mbcas-system logs deploy/mbcas-controller`. Verify RBAC allows `pods/resize` patch. |
-| Pods stuck in "Pending" status | Check cooldown (30s) and step size limits (1.5x). Controller waits if safety rules trigger. |
+Benabbou Imane, Bouazza Imane, Alaoui Sosse Saad, Taqi Mohamed Chadi
 
 ---
 
-## Support & Feedback
-
-This is a **research project** developed as part of a collaborative academic initiative. For questions or feedback:
-- Review `COMPLETE_CODEBASE_ANALYSIS.md` for detailed implementation notes
-- Check `docs/` directory for architecture guides and evaluation reports
-- Refer to game theory primers in `game_theory_concepts_simple.md`
-
----
-
-## Summary
-
-**MBCAS** is a working prototype of **kernel-informed, game-theoretic CPU allocation for Kubernetes**. It's fully implemented, tested, and ready for MVP deployment. Use it to:
-- Learn how market mechanisms can coordinate microservices
-- Evaluate fairness-aware autoscaling in your environment
-- Reduce operational overhead of manual resource tuning
-- Demonstrate practical game theory applications
-
-**Next step:** Run `bash scripts/mvp-test.sh all` and watch MBCAS allocate CPU dynamically.
+**⚠️ This is a demo/educational project. Not for production use.**

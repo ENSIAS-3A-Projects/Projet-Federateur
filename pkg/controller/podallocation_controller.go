@@ -34,6 +34,18 @@ const (
 	// Symmetric: both increases and decreases are limited to 1.5x.
 	MaxStepSizeFactor = 1.5
 
+	// DefaultCPULimit is used when a pod has no CPU limit defined.
+	// With LimitRange policy, this should rarely be needed.
+	DefaultCPULimit = "500m"
+
+	// ManagedLabel is the label that controls MBCAS management.
+	// Pods/namespaces with "false" are excluded.
+	ManagedLabel = "mbcas.io/managed"
+
+	// SkipGuaranteedAnnotation allows opting out of Guaranteed QoS skip.
+	// Set to "false" to manage Guaranteed QoS pods.
+	SkipGuaranteedAnnotation = "mbcas.io/skip-guaranteed"
+
 	// PhaseApplied indicates the CPU limit was successfully applied.
 	PhaseApplied = "Applied"
 	// PhasePending indicates reconciliation is in progress.
@@ -45,8 +57,8 @@ const (
 // PodAllocationReconciler reconciles PodAllocation objects.
 type PodAllocationReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme    *runtime.Scheme
+	Recorder  record.EventRecorder
 	K8sClient kubernetes.Interface
 }
 
@@ -91,8 +103,25 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, fmt.Errorf("get Pod: %w", err)
 	}
 
-	// Explicit Guaranteed QoS check: skip these pods
-	if isGuaranteedQoS(pod) {
+	// Check if pod is excluded via label (manage-everyone with opt-out)
+	if isExcluded(pod) {
+		now := metav1.Now()
+		pa.Status.Phase = PhaseApplied
+		pa.Status.Reason = "Excluded"
+		pa.Status.AppliedCPULimit = pa.Spec.DesiredCPULimit
+		if pa.Status.LastAppliedTime == nil {
+			pa.Status.LastAppliedTime = &now
+		}
+		if err := r.Status().Update(ctx, pa); err != nil {
+			return ctrl.Result{}, fmt.Errorf("update status: %w", err)
+		}
+		r.Recorder.Event(pa, corev1.EventTypeNormal, "CPULimitSkipped",
+			fmt.Sprintf("Skipping Pod %s/%s: excluded via label", pa.Spec.Namespace, pa.Spec.PodName))
+		return ctrl.Result{}, nil
+	}
+
+	// Policy-driven Guaranteed QoS check (default: skip, but can opt-in via annotation)
+	if shouldSkipGuaranteed(pod) && isGuaranteedQoS(pod) {
 		now := metav1.Now()
 		pa.Status.Phase = PhaseApplied
 		pa.Status.Reason = "GuaranteedQoS"
@@ -329,6 +358,8 @@ func isGuaranteedQoS(pod *corev1.Pod) bool {
 }
 
 // extractCPULimit extracts the CPU limit from the first container of a pod.
+// If no limit is set, returns DefaultCPULimit to allow MBCAS to manage the pod.
+// This enables "manage everyone" mode where LimitRange provides defaults.
 func extractCPULimit(pod *corev1.Pod) (string, error) {
 	if len(pod.Spec.Containers) == 0 {
 		return "", fmt.Errorf("pod has no containers")
@@ -339,7 +370,27 @@ func extractCPULimit(pod *corev1.Pod) (string, error) {
 		return cpuLimit.String(), nil
 	}
 
-	return "", fmt.Errorf("container %s has no CPU limit", container.Name)
+	// No limit set - return default to enable manage-everyone mode
+	// LimitRange policy should inject limits, but handle gracefully if missing
+	return DefaultCPULimit, nil
+}
+
+// isExcluded checks if a pod should be excluded from MBCAS management.
+// Pods with label mbcas.io/managed=false are excluded.
+func isExcluded(pod *corev1.Pod) bool {
+	if val, ok := pod.Labels[ManagedLabel]; ok {
+		return val == "false"
+	}
+	return false
+}
+
+// shouldSkipGuaranteed checks if Guaranteed QoS pods should be skipped.
+// Default is true (skip), but can be overridden with annotation.
+func shouldSkipGuaranteed(pod *corev1.Pod) bool {
+	if val, ok := pod.Annotations[SkipGuaranteedAnnotation]; ok {
+		return val != "false"
+	}
+	return true // Default: skip Guaranteed QoS
 }
 
 // extractCPULimitString is a helper to extract CPU limit as string, returning "none" if not set.
@@ -353,4 +404,3 @@ func extractCPULimitString(pod *corev1.Pod) string {
 	}
 	return "none"
 }
-
