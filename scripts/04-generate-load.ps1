@@ -7,8 +7,10 @@
 
 param(
     [int]$Duration = 120,                           # Load duration in seconds
-    [int]$Intensity = 2,                            # Number of CPU workers (1-4)
+    [int]$Intensity = 32,                            # Number of CPU workers (1-4)
     [string]$Service = "bus-service",               # Target service: bus, ticket, trajet, gateway
+    [string]$RunId = "",                           # Optional run identifier for recordings
+    [string]$RecordFile = "",                      # Optional explicit path for JSON recording
     [switch]$Stop,                                  # Stop any running load
     [switch]$Background                             # Run in background
 )
@@ -16,11 +18,51 @@ param(
 $ErrorActionPreference = "Stop"
 $LOAD_POD_NAME = "load-generator"
 $NAMESPACE = "urbanmove"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ArtifactDir = Join-Path $ScriptDir "artifacts"
+
+if (-not (Test-Path $ArtifactDir)) { New-Item -ItemType Directory -Path $ArtifactDir -Force | Out-Null }
+if (-not $RunId) { $RunId = (New-Guid).Guid }
+if (-not $RecordFile) { $RecordFile = Join-Path $ArtifactDir ("load-run-$RunId.json") }
 
 # Helper functions
 function Write-Info { Write-Host "[INFO] $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "[WARN] $args" -ForegroundColor Yellow }
 function Write-Err { Write-Host "[ERROR] $args" -ForegroundColor Red; exit 1 }
+
+function Initialize-Recording {
+    if (-not (Test-Path $RecordFile)) {
+        $doc = @{
+            runId = $RunId
+            kind = "load-run"
+            started = (Get-Date).ToString("o")
+            namespace = $NAMESPACE
+            service = $Service
+            durationSeconds = $Duration
+            intensity = $Intensity
+            background = [bool]$Background
+            events = @()
+        }
+        $doc | ConvertTo-Json -Depth 6 | Set-Content -Path $RecordFile -Encoding UTF8
+    }
+}
+
+function Append-Event {
+    param(
+        [string]$Type,
+        [hashtable]$Data
+    )
+
+    if (-not (Test-Path $RecordFile)) { Initialize-Recording }
+
+    $doc = Get-Content -Path $RecordFile -Raw | ConvertFrom-Json
+    $doc.events += @{
+        timestamp = (Get-Date).ToString("o")
+        type = $Type
+        data = $Data
+    }
+    $doc | ConvertTo-Json -Depth 6 | Set-Content -Path $RecordFile -Encoding UTF8
+}
 
 function Stop-LoadGenerator {
     Write-Info "Stopping load generators..."
@@ -33,11 +75,14 @@ function Stop-LoadGenerator {
         if ($pods) {
             foreach ($pod in ($pods -split " ")) {
                 kubectl exec -n $NAMESPACE $pod -- pkill stress 2>$null
+                kubectl exec -n $NAMESPACE $pod -- pkill -9 dd 2>$null
+                kubectl exec -n $NAMESPACE $pod -- pkill -9 md5sum 2>$null
             }
         }
     }
     
     Write-Info "[OK] Load stopped"
+        Append-Event -Type "load-stopped" -Data @{ reason = "manual stop" }
 }
 
 function Start-LoadOnService {
@@ -64,6 +109,8 @@ function Start-LoadOnService {
     
     Write-Info "Target pod: $targetPod"
     Write-Info "Executing: CPU burn for $Duration seconds with $Intensity workers"
+
+        Append-Event -Type "load-started" -Data @{ targetPod = $targetPod; command = "dd|md5sum" }
     
     if ($Background) {
         # Run in background (non-blocking)
@@ -81,6 +128,7 @@ function Start-LoadOnService {
         Write-Host ""
         
         kubectl exec -n $NAMESPACE $targetPod -- sh -c $cmd
+        Append-Event -Type "load-completed" -Data @{ targetPod = $targetPod }
     }
 }
 
@@ -125,6 +173,7 @@ spec:
     Write-Info "Service: $Service (indirect load via workload)"
     Write-Info "Duration: $Duration seconds"
     Write-Info "Intensity: $Intensity CPU workers"
+        Append-Event -Type "generator-started" -Data @{ pod = $LOAD_POD_NAME }
     Write-Host ""
     Write-Host "Monitor with: .\scripts\05-monitor-scaling.ps1" -ForegroundColor Cyan
 }
@@ -159,6 +208,8 @@ Write-Host "MBCAS Demo - Step 4: Generate Load on UrbanMoveMS" -ForegroundColor 
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host ""
 
+Initialize-Recording
+
 if ($Stop) {
     Stop-LoadGenerator
     Show-LoadStatus
@@ -188,7 +239,11 @@ Write-Info "Load Configuration:"
 Write-Info "  Service: $Service"
 Write-Info "  Duration: $Duration seconds"
 Write-Info "  Intensity: $Intensity CPU workers"
+Write-Info "  RunId: $RunId"
+Write-Info "  Record: $RecordFile"
 Write-Host ""
+
+Append-Event -Type "config" -Data @{ service = $Service; durationSeconds = $Duration; intensity = $Intensity }
 
 # Load directly on service pod
 Start-LoadOnService

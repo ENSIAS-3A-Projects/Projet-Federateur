@@ -28,11 +28,11 @@ import (
 
 const (
 	// ResizeCooldown is the minimum time between resize operations per pod.
-	ResizeCooldown = 30 * time.Second
+	ResizeCooldown = 10 * time.Second
 
 	// MaxStepSizeFactor is the maximum factor by which CPU can change per resize.
-	// Symmetric: both increases and decreases are limited to 1.5x.
-	MaxStepSizeFactor = 1.5
+	// Symmetric: both increases and decreases are limited to 3x to make demo scaling visible.
+	MaxStepSizeFactor = 3.0
 
 	// DefaultCPULimit is used when a pod has no CPU limit defined.
 	// With LimitRange policy, this should rarely be needed.
@@ -101,6 +101,14 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				fmt.Sprintf("Pod %s/%s not found", pa.Spec.Namespace, pa.Spec.PodName), nil)
 		}
 		return ctrl.Result{}, fmt.Errorf("get Pod: %w", err)
+	}
+
+	// Default managed label to true so monitor output reflects inclusion without manual tagging.
+	if err := r.ensureManagedLabel(ctx, pod); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("ensure managed label: %w", err)
 	}
 
 	// Check if pod is excluded via label (manage-everyone with opt-out)
@@ -270,6 +278,24 @@ func (r *PodAllocationReconciler) updateStatus(ctx context.Context, pa *v1alpha1
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ensureManagedLabel defaults the managed label to "true" for pods without an explicit setting.
+// This keeps the demo UI aligned with the controller's manage-everyone behavior.
+func (r *PodAllocationReconciler) ensureManagedLabel(ctx context.Context, pod *corev1.Pod) error {
+	if pod.Labels != nil {
+		if val, ok := pod.Labels[ManagedLabel]; ok && val != "" {
+			return nil
+		}
+	}
+
+	patch := client.MergeFrom(pod.DeepCopy())
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	pod.Labels[ManagedLabel] = "true"
+
+	return r.Patch(ctx, pod, patch)
 }
 
 // Safety check errors

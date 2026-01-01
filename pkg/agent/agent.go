@@ -176,7 +176,8 @@ func (a *Agent) sample() error {
 		smoothedDemand := tracker.Update(rawDemand)
 		a.mu.Unlock()
 
-		klog.V(5).InfoS("Pod demand sample", "pod", pod.Name, "namespace", pod.Namespace,
+		// Log at info level so demand visibility is always on during demo
+		klog.InfoS("Pod demand sample", "pod", pod.Name, "namespace", pod.Namespace,
 			"raw", rawDemand, "smoothed", smoothedDemand)
 	}
 

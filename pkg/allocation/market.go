@@ -1,7 +1,14 @@
 package allocation
 
-// Package allocation implements Phase 4: Market-based CPU allocation using
-// Fisher-market / proportional fairness (Nash Social Welfare maximization).
+// Package allocation implements demand-capped CPU allocation.
+//
+// This is a drop-in replacement for the original market.go that changes
+// the allocation philosophy from "fair share of capacity" to "need + headroom".
+//
+// Behavior:
+//   - Uncongested (Σ need <= capacity): Each pod gets exactly what it needs
+//   - Congested (Σ need > capacity): Nash bargaining reduces surplus proportionally
+//   - Overloaded (Σ min > capacity): Baselines scaled (emergency mode)
 
 import (
 	"sort"
@@ -9,260 +16,355 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+// AllocationMode indicates which allocation path was taken.
+type AllocationMode string
+
+const (
+	// ModeUncongested means total need <= capacity; everyone gets what they need.
+	ModeUncongested AllocationMode = "uncongested"
+	// ModeCongested means total need > capacity; Nash reduction applied.
+	ModeCongested AllocationMode = "congested"
+	// ModeOverloaded means total baselines > capacity; emergency scaling.
+	ModeOverloaded AllocationMode = "overloaded"
+)
+
+// AllocationResult contains allocations and metadata.
+type AllocationResult struct {
+	Allocations map[types.UID]int64
+	Mode        AllocationMode
+	TotalNeed   int64
+	TotalAlloc  int64
+}
+
 // PodParams represents market parameters for a pod.
 type PodParams struct {
-	Demand   float64 // Normalized demand [0,1]
-	Bid      float64 // Effective bid (weight × demand)
-	MinMilli int64   // Minimum CPU in millicores
-	MaxMilli int64   // Maximum CPU in millicores
-	Weight   float64 // Budget/weight (for zero-bid fallback)
+	Demand   float64 // Normalized demand [0,1] from throttling signal
+	Bid      float64 // Effective bid (weight × demand) - kept for compatibility
+	MinMilli int64   // Minimum CPU in millicores (baseline)
+	MaxMilli int64   // Maximum CPU in millicores (ceiling)
+	Weight   float64 // Budget/weight (from request CPU)
 }
 
-// ClearMarket performs market-clearing allocation using proportional fairness.
-// Returns allocations in millicores (int64) for deterministic, high-resolution results.
+// ClearMarket performs demand-capped allocation.
+//
+// This replaces the original fair-share algorithm with:
+//   1. Compute "need" for each pod based on demand signal
+//   2. If total need <= capacity: give everyone their need (uncongested)
+//   3. If total need > capacity: apply Nash bargaining reduction (congested)
+//   4. If total baselines > capacity: scale baselines (overloaded)
+//
+// Returns allocations in millicores (int64).
+func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams) map[types.UID]int64 {
+	result := ClearMarketWithMetadata(capacityMilli, pods)
+	return result.Allocations
+}
+
+// ClearMarketWithMetadata performs allocation and returns metadata for observability.
+func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) AllocationResult {
+	if len(pods) == 0 {
+		return AllocationResult{
+			Allocations: make(map[types.UID]int64),
+			Mode:        ModeUncongested,
+		}
+	}
+
+	// Step 1: Compute need for each pod
+	needs := make(map[types.UID]int64)
+	totalNeed := int64(0)
+	totalMin := int64(0)
+
+	for uid, p := range pods {
+		need := computeNeed(p)
+		needs[uid] = need
+		totalNeed += need
+		totalMin += p.MinMilli
+	}
+
+	// Step 2: Check overloaded condition (baselines exceed capacity)
+	if totalMin > capacityMilli {
+		allocs := scaleBaselines(pods, capacityMilli)
+		totalAlloc := int64(0)
+		for _, a := range allocs {
+			totalAlloc += a
+		}
+		return AllocationResult{
+			Allocations: allocs,
+			Mode:        ModeOverloaded,
+			TotalNeed:   totalNeed,
+			TotalAlloc:  totalAlloc,
+		}
+	}
+
+	// Step 3: Check congested condition (needs exceed capacity)
+	if totalNeed > capacityMilli {
+		allocs := nashReduce(needs, pods, capacityMilli)
+		totalAlloc := int64(0)
+		for _, a := range allocs {
+			totalAlloc += a
+		}
+		return AllocationResult{
+			Allocations: allocs,
+			Mode:        ModeCongested,
+			TotalNeed:   totalNeed,
+			TotalAlloc:  totalAlloc,
+		}
+	}
+
+	// Step 4: Uncongested - give everyone what they need
+	allocs := clampToBounds(needs, pods)
+	return AllocationResult{
+		Allocations: allocs,
+		Mode:        ModeUncongested,
+		TotalNeed:   totalNeed,
+		TotalAlloc:  totalNeed, // In uncongested mode, alloc = need
+	}
+}
+
+// computeNeed estimates CPU required to eliminate throttling for a pod.
+//
+// The demand signal [0,1] maps to CPU need:
+//   demand=0.0 → not throttling → need = baseline + small headroom
+//   demand=0.5 → moderate throttling → need = midpoint of range + headroom
+//   demand=1.0 → severe throttling → need = max (give everything)
+//
+// Headroom scales with demand: 10% at zero demand, up to 25% at full demand.
+// This ensures pods under stress get extra buffer.
+func computeNeed(p PodParams) int64 {
+	// Clamp demand to [0,1] defensively
+	demand := p.Demand
+	if demand < 0 {
+		demand = 0
+	}
+	if demand > 1 {
+		demand = 1
+	}
+
+	// Base need starts at minimum (baseline)
+	baseNeed := p.MinMilli
+
+	// Demand-driven component: interpolate between min and max
+	demandRange := p.MaxMilli - p.MinMilli
+	if demandRange < 0 {
+		demandRange = 0
+	}
+	demandComponent := int64(float64(demandRange) * demand)
+
+	rawNeed := baseNeed + demandComponent
+
+	// Adaptive headroom: higher demand → more headroom
+	// 10% base + up to 15% additional based on demand
+	headroomFactor := 0.10 + (demand * 0.15)
+	headroom := int64(float64(rawNeed) * headroomFactor)
+
+	need := rawNeed + headroom
+
+	// Clamp to pod bounds
+	if need < p.MinMilli {
+		need = p.MinMilli
+	}
+	if need > p.MaxMilli {
+		need = p.MaxMilli
+	}
+
+	return need
+}
+
+// nashReduce applies Nash Bargaining Solution when total need > capacity.
 //
 // Algorithm:
-//   1. Allocate minimums (scale down if they exceed capacity)
-//   2. Compute effective bids (weight × demand)
-//   3. Distribute remaining proportionally to bids (or weights if zero bids)
-//   4. Enforce maximum bounds with water-filling redistribution
-//   5. Round to int64 millicores deterministically
+//   1. Everyone keeps their baseline (MinMilli) - the "disagreement point"
+//   2. Surplus demand (need - baseline) is the negotiable portion
+//   3. Available surplus = capacity - total baselines
+//   4. Each pod gets: baseline + (surplus * reduction_ratio)
 //
-// This maximizes Nash Social Welfare: Σ log(cpu_i) subject to capacity and bounds.
-func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams) map[types.UID]int64 {
-	if len(pods) == 0 {
-		return make(map[types.UID]int64)
-	}
-
-	// Step 1: Handle minimums exceeding capacity
-	totalMin := int64(0)
-	for _, params := range pods {
-		totalMin += params.MinMilli
-	}
-
-	var scaleFactor float64
-	var remaining float64
-	targets := make(map[types.UID]float64)
-
-	if totalMin > capacityMilli {
-		// Scale down minimums proportionally
-		scaleFactor = float64(capacityMilli) / float64(totalMin)
-		remaining = 0
-		// Create adjusted PodParams with scaled minimums for rounding
-		adjustedPods := make(map[types.UID]PodParams)
-		for uid, params := range pods {
-			scaledMin := float64(params.MinMilli) * scaleFactor
-			targets[uid] = scaledMin
-			// Create adjusted params with scaled minimum for rounding
-			adjustedPods[uid] = PodParams{
-				Demand:   params.Demand,
-				Bid:      params.Bid,
-				MinMilli: int64(scaledMin), // Use scaled minimum
-				MaxMilli: params.MaxMilli,
-				Weight:   params.Weight,
-			}
-		}
-		// Use adjusted pods for rounding
-		return roundDeterministic(targets, adjustedPods)
-	} else {
-		// Allocate minimums, compute remaining
-		remaining = float64(capacityMilli - totalMin)
-		for uid, params := range pods {
-			targets[uid] = float64(params.MinMilli)
-		}
-	}
-
-	// Step 2: Compute effective bids and determine redistribution basis
-	totalBid := 0.0
-	totalWeight := 0.0
-	for _, params := range pods {
-		totalBid += params.Bid
-		totalWeight += params.Weight
-	}
-
-	// Determine redistribution basis (used in both Step 3 and Step 4)
-	type redistributionKey struct {
-		value float64
-		uid   types.UID
-	}
-	redistKeys := make(map[types.UID]float64)
-	var totalRedistKey float64
-
-	if totalBid > 0 {
-		// Use bids as redistribution key
-		for uid, params := range pods {
-			redistKeys[uid] = params.Bid
-			totalRedistKey += params.Bid
-		}
-	} else if totalWeight > 0 {
-		// Use weights as redistribution key
-		for uid, params := range pods {
-			redistKeys[uid] = params.Weight
-			totalRedistKey += params.Weight
-		}
-	} else {
-		// Equal share: use 1.0 for all
-		for uid := range pods {
-			redistKeys[uid] = 1.0
-			totalRedistKey += 1.0
-		}
-	}
-
-	// Step 3: Proportional distribution using the chosen basis
-	if totalRedistKey > 0 {
-		for uid := range pods {
-			share := (redistKeys[uid] / totalRedistKey) * remaining
-			targets[uid] += share
-		}
-	}
-
-	// Step 4: Enforce maximum bounds (water-filling)
-	for {
-		excess := 0.0
-		uncappedKey := 0.0
-		uncappedUIDs := make([]types.UID, 0)
-
-		for uid, params := range pods {
-			if targets[uid] > float64(params.MaxMilli) {
-				excess += targets[uid] - float64(params.MaxMilli)
-				targets[uid] = float64(params.MaxMilli)
-			} else if targets[uid] < float64(params.MaxMilli) {
-				// Use the same redistribution key as Step 3
-				uncappedKey += redistKeys[uid]
-				uncappedUIDs = append(uncappedUIDs, uid)
-			}
-		}
-
-		if excess <= 0.0001 { // Small epsilon for float comparison
-			break
-		}
-
-		if uncappedKey > 0 {
-			// Redistribute excess proportionally to uncapped pods using the same basis
-			for _, uid := range uncappedUIDs {
-				share := (redistKeys[uid] / uncappedKey) * excess
-				targets[uid] += share
-			}
-		} else {
-			// All pods capped, excess remains unused
-			break
-		}
-	}
-
-	// Step 5: Deterministic rounding to int64 millicores
-	// Use largest remainder method with UID tie-break for determinism
-	return roundDeterministic(targets, pods)
-}
-
-// roundDeterministic rounds float targets to int64 millicores using largest remainder method.
-// Uses UID as stable tie-breaker for determinism.
-// Bound-aware: never exceeds MaxMilli or goes below MinMilli.
-func roundDeterministic(targets map[types.UID]float64, pods map[types.UID]PodParams) map[types.UID]int64 {
+// This maximizes the Nash product: Π(allocation_i - baseline_i)
+// which is equivalent to proportional reduction of surplus.
+func nashReduce(needs map[types.UID]int64, pods map[types.UID]PodParams, capacity int64) map[types.UID]int64 {
 	allocations := make(map[types.UID]int64)
-	remainders := make([]struct {
-		uid       types.UID
-		floor     int64
-		remainder float64
-		minMilli  int64
-		maxMilli  int64
-	}, 0, len(targets))
 
-	// Compute floors and remainders, clamping to bounds
-	totalFloor := int64(0)
-	for uid, target := range targets {
-		params := pods[uid]
-		// Floor with small epsilon to handle float precision
-		floor := int64(target + 0.0001)
+	// Calculate baselines and surpluses
+	totalBaseline := int64(0)
+	surpluses := make(map[types.UID]int64)
+	totalSurplus := int64(0)
 
-		// Clamp to bounds immediately
-		if floor < params.MinMilli {
-			floor = params.MinMilli
+	for uid, p := range pods {
+		totalBaseline += p.MinMilli
+
+		surplus := needs[uid] - p.MinMilli
+		if surplus < 0 {
+			surplus = 0
 		}
-		if floor > params.MaxMilli {
-			floor = params.MaxMilli
-		}
-
-		remainder := target - float64(floor)
-		remainders = append(remainders, struct {
-			uid       types.UID
-			floor     int64
-			remainder float64
-			minMilli  int64
-			maxMilli  int64
-		}{uid, floor, remainder, params.MinMilli, params.MaxMilli})
-		allocations[uid] = floor
-		totalFloor += floor
+		surpluses[uid] = surplus
+		totalSurplus += surplus
 	}
 
-	// Calculate total target (sum of all targets)
-	totalTarget := 0.0
-	for _, target := range targets {
-		totalTarget += target
+	// Available capacity for surplus distribution
+	availableSurplus := capacity - totalBaseline
+	if availableSurplus < 0 {
+		// Should not happen (overloaded case handled earlier), but be safe
+		return scaleBaselines(pods, capacity)
 	}
 
-	// Calculate leftover millicores to distribute
-	totalTargetMilli := int64(totalTarget + 0.5) // Round to nearest
-	leftover := totalTargetMilli - totalFloor
-
-	if leftover == 0 {
-		// Final bound check (defensive)
-		for uid, params := range pods {
-			if allocations[uid] < params.MinMilli {
-				allocations[uid] = params.MinMilli
-			}
-			if allocations[uid] > params.MaxMilli {
-				allocations[uid] = params.MaxMilli
-			}
+	// Compute reduction ratio
+	var ratio float64
+	if totalSurplus > 0 {
+		ratio = float64(availableSurplus) / float64(totalSurplus)
+		if ratio > 1.0 {
+			ratio = 1.0 // Don't inflate beyond need
 		}
-		return allocations
+	} else {
+		// No surplus demand: everyone gets baseline
+		ratio = 0.0
 	}
 
-	// Sort by remainder (descending), then by UID for tie-break
-	// Only consider pods that can accept more (below max)
-	sort.Slice(remainders, func(i, j int) bool {
-		if remainders[i].remainder != remainders[j].remainder {
-			return remainders[i].remainder > remainders[j].remainder
-		}
-		return string(remainders[i].uid) < string(remainders[j].uid)
-	})
+	// Allocate: baseline + reduced surplus
+	for uid, p := range pods {
+		reducedSurplus := int64(float64(surpluses[uid]) * ratio)
+		allocation := p.MinMilli + reducedSurplus
 
-	// Distribute leftover to pods with largest remainders (bound-aware)
+		// Clamp to bounds (defensive)
+		if allocation < p.MinMilli {
+			allocation = p.MinMilli
+		}
+		if allocation > p.MaxMilli {
+			allocation = p.MaxMilli
+		}
+
+		allocations[uid] = allocation
+	}
+
+	// Handle rounding: distribute any leftover to pods with room
+	totalAlloc := int64(0)
+	for _, a := range allocations {
+		totalAlloc += a
+	}
+	leftover := capacity - totalAlloc
+
 	if leftover > 0 {
-		for i := int64(0); i < leftover && i < int64(len(remainders)); i++ {
-			r := remainders[i]
-			// Only increment if below max
-			if allocations[r.uid] < r.maxMilli {
-				allocations[r.uid]++
-			}
+		// Sort UIDs for determinism
+		uids := make([]types.UID, 0, len(pods))
+		for uid := range pods {
+			uids = append(uids, uid)
 		}
-	} else if leftover < 0 {
-		// If we over-allocated (shouldn't happen, but handle gracefully)
-		// Sort ascending and reduce from smallest remainders (bound-aware)
-		sort.Slice(remainders, func(i, j int) bool {
-			if remainders[i].remainder != remainders[j].remainder {
-				return remainders[i].remainder < remainders[j].remainder
-			}
-			return string(remainders[i].uid) < string(remainders[j].uid)
+		sort.Slice(uids, func(i, j int) bool {
+			return string(uids[i]) < string(uids[j])
 		})
-		for i := int64(0); i < -leftover && i < int64(len(remainders)); i++ {
-			r := remainders[i]
-			// Only decrement if above min
-			if allocations[r.uid] > r.minMilli {
-				allocations[r.uid]--
-			}
-		}
-	}
 
-	// Final bound check (defensive)
-	for uid, params := range pods {
-		if allocations[uid] < params.MinMilli {
-			allocations[uid] = params.MinMilli
-		}
-		if allocations[uid] > params.MaxMilli {
-			allocations[uid] = params.MaxMilli
+		// Distribute leftover to pods with headroom
+		for _, uid := range uids {
+			if leftover <= 0 {
+				break
+			}
+			p := pods[uid]
+			headroom := p.MaxMilli - allocations[uid]
+			if headroom > 0 {
+				add := leftover
+				if add > headroom {
+					add = headroom
+				}
+				allocations[uid] += add
+				leftover -= add
+			}
 		}
 	}
 
 	return allocations
 }
 
+// scaleBaselines handles the overloaded case when total baselines > capacity.
+// This is an emergency mode indicating severe over-commitment.
+//
+// All baselines are scaled proportionally to fit within capacity.
+func scaleBaselines(pods map[types.UID]PodParams, capacity int64) map[types.UID]int64 {
+	allocations := make(map[types.UID]int64)
+
+	totalMin := int64(0)
+	for _, p := range pods {
+		totalMin += p.MinMilli
+	}
+
+	if totalMin == 0 {
+		// Edge case: all pods have zero baseline
+		// Give each pod equal share
+		share := capacity / int64(len(pods))
+		for uid := range pods {
+			allocations[uid] = share
+		}
+		return allocations
+	}
+
+	scale := float64(capacity) / float64(totalMin)
+
+	// Sort UIDs for deterministic rounding
+	uids := make([]types.UID, 0, len(pods))
+	for uid := range pods {
+		uids = append(uids, uid)
+	}
+	sort.Slice(uids, func(i, j int) bool {
+		return string(uids[i]) < string(uids[j])
+	})
+
+	// First pass: floor allocations
+	totalAlloc := int64(0)
+	remainders := make([]struct {
+		uid       types.UID
+		remainder float64
+	}, 0, len(pods))
+
+	for _, uid := range uids {
+		p := pods[uid]
+		scaled := float64(p.MinMilli) * scale
+		floor := int64(scaled)
+
+		// Enforce absolute minimum (prevent complete starvation)
+		const absoluteMin = int64(10) // 10m
+		if floor < absoluteMin && capacity >= absoluteMin*int64(len(pods)) {
+			floor = absoluteMin
+		}
+
+		allocations[uid] = floor
+		totalAlloc += floor
+		remainders = append(remainders, struct {
+			uid       types.UID
+			remainder float64
+		}{uid, scaled - float64(floor)})
+	}
+
+	// Second pass: distribute leftover by largest remainder
+	leftover := capacity - totalAlloc
+	if leftover > 0 {
+		sort.Slice(remainders, func(i, j int) bool {
+			if remainders[i].remainder != remainders[j].remainder {
+				return remainders[i].remainder > remainders[j].remainder
+			}
+			return string(remainders[i].uid) < string(remainders[j].uid)
+		})
+
+		for i := int64(0); i < leftover && i < int64(len(remainders)); i++ {
+			allocations[remainders[i].uid]++
+		}
+	}
+
+	return allocations
+}
+
+// clampToBounds ensures allocations respect pod min/max bounds.
+func clampToBounds(needs map[types.UID]int64, pods map[types.UID]PodParams) map[types.UID]int64 {
+	allocations := make(map[types.UID]int64)
+
+	for uid, need := range needs {
+		p := pods[uid]
+		allocation := need
+
+		if allocation < p.MinMilli {
+			allocation = p.MinMilli
+		}
+		if allocation > p.MaxMilli {
+			allocation = p.MaxMilli
+		}
+
+		allocations[uid] = allocation
+	}
+
+	return allocations
+}

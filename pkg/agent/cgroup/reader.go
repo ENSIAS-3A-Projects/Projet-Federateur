@@ -33,9 +33,11 @@ type PodSample struct {
 // Reader reads cgroup statistics for pods.
 // ReadPodDemand is safe for concurrent use (protected by mu).
 type Reader struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// Last samples per pod (for delta calculation)
 	samples map[string]*PodSample
+	// Cache of discovered cgroup paths (to avoid repeated glob operations)
+	pathCache map[string]string
 }
 
 // NewReader creates a new cgroup reader.
@@ -45,9 +47,23 @@ func NewReader() (*Reader, error) {
 		return nil, fmt.Errorf("cgroup v2 not available at %s: %w", CgroupV2BasePath, err)
 	}
 
+	// Log cgroup structure for debugging
+	klog.InfoS("Initializing cgroup reader", "basePath", CgroupV2BasePath)
+	entries, err := os.ReadDir(CgroupV2BasePath)
+	if err == nil {
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		klog.InfoS("Cgroup base directories", "dirs", dirs)
+	}
+
 	return &Reader{
-		samples: make(map[string]*PodSample),
-		mu:      sync.RWMutex{},
+		samples:   make(map[string]*PodSample),
+		pathCache: make(map[string]string),
+		mu:        sync.RWMutex{},
 	}, nil
 }
 
@@ -62,6 +78,12 @@ func NewReader() (*Reader, error) {
 func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 	cgroupPath, err := r.findPodCgroupPath(pod)
 	if err != nil {
+		// FIXED: Log at higher verbosity to make failures visible
+		klog.V(2).InfoS("Cgroup path not found for pod",
+			"pod", pod.Name,
+			"namespace", pod.Namespace,
+			"uid", pod.UID,
+			"error", err)
 		return 0.0, fmt.Errorf("find cgroup path: %w", err)
 	}
 
@@ -73,10 +95,10 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 
 	// Calculate delta from last sample (with mutex protection)
 	key := string(pod.UID)
-	
+
 	r.mu.Lock()
 	lastSample := r.samples[key]
-	
+
 	var demand float64
 	if lastSample != nil {
 		// Compute throttling ratio: delta throttled / delta usage
@@ -97,12 +119,22 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 			if demand < 0.0 {
 				demand = 0.0
 			}
+
+			// FIXED: Log actual throttling data for debugging
+			klog.V(4).InfoS("Pod throttling metrics",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"deltaThrottled", deltaThrottled,
+				"deltaUsage", deltaUsage,
+				"throttlingRatio", throttlingRatio,
+				"normalizedDemand", demand)
 		} else {
 			// No usage delta, no demand signal
 			demand = 0.0
 		}
 	} else {
 		// First sample, no demand yet
+		klog.V(4).InfoS("First cgroup sample for pod", "pod", pod.Name, "namespace", pod.Namespace)
 		demand = 0.0
 	}
 
@@ -115,25 +147,62 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 
 // findPodCgroupPath finds the cgroup path for a pod.
 // Supports cgroup v2 with kubelet conventions.
+// FIXED: Added more patterns and better logging.
 func (r *Reader) findPodCgroupPath(pod *corev1.Pod) (string, error) {
-	// Try common cgroup v2 patterns
+	podUID := string(pod.UID)
+
+	// Check cache first
+	r.mu.RLock()
+	if cached, ok := r.pathCache[podUID]; ok {
+		r.mu.RUnlock()
+		return cached, nil
+	}
+	r.mu.RUnlock()
+
+	// Sanitize UID for cgroup path (replace - with _)
+	sanitizedUID := strings.ReplaceAll(podUID, "-", "_")
+
+	// Try common cgroup v2 patterns (expanded list)
 	patterns := []string{
-		// Pattern: kubepods.slice/kubepods-<qos>.slice/kubepods-<qos>-pod<podUID>.slice
-		fmt.Sprintf("kubepods.slice/kubepods-*.slice/kubepods-*-pod%s.slice", string(pod.UID)),
-		// Pattern: kubepods/kubepods-<qos>/kubepods-<qos>-pod<podUID>
-		fmt.Sprintf("kubepods/kubepods-*/kubepods-*-pod%s", string(pod.UID)),
+		// Pattern 1: systemd cgroup driver with slice hierarchy (most common)
+		fmt.Sprintf("kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod%s.slice", sanitizedUID),
+		fmt.Sprintf("kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod%s.slice", sanitizedUID),
+		fmt.Sprintf("kubepods.slice/kubepods-guaranteed.slice/kubepods-guaranteed-pod%s.slice", sanitizedUID),
+
+		// Pattern 2: systemd with original UID format (dashes)
+		fmt.Sprintf("kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod%s.slice", podUID),
+		fmt.Sprintf("kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod%s.slice", podUID),
+
+		// Pattern 3: cgroupfs driver (no slices)
+		fmt.Sprintf("kubepods/burstable/pod%s", podUID),
+		fmt.Sprintf("kubepods/besteffort/pod%s", podUID),
+		fmt.Sprintf("kubepods/guaranteed/pod%s", podUID),
+
+		// Pattern 4: Minikube specific patterns
+		fmt.Sprintf("kubepods.slice/kubepods-pod%s.slice", sanitizedUID),
+		fmt.Sprintf("kubepods/pod%s", podUID),
+
+		// Pattern 5: Wildcard glob patterns (fallback)
+		fmt.Sprintf("kubepods.slice/kubepods-*.slice/kubepods-*-pod%s.slice", sanitizedUID),
+		fmt.Sprintf("kubepods/kubepods-*/kubepods-*-pod%s", podUID),
 	}
 
 	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(CgroupV2BasePath, pattern))
+		fullPattern := filepath.Join(CgroupV2BasePath, pattern)
+		matches, err := filepath.Glob(fullPattern)
 		if err != nil {
 			continue
 		}
-		if len(matches) > 0 {
+		for _, match := range matches {
 			// Verify it has cpu.stat
-			cpuStatPath := filepath.Join(matches[0], CPUStatFile)
+			cpuStatPath := filepath.Join(match, CPUStatFile)
 			if _, err := os.Stat(cpuStatPath); err == nil {
-				return matches[0], nil
+				// Cache the result
+				r.mu.Lock()
+				r.pathCache[podUID] = match
+				r.mu.Unlock()
+				klog.V(3).InfoS("Found cgroup path for pod", "pod", pod.Name, "path", match)
+				return match, nil
 			}
 		}
 	}
@@ -183,7 +252,7 @@ func (r *Reader) readCPUSample(cgroupPath string) (*PodSample, error) {
 func (r *Reader) Cleanup(existingPods map[string]bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	for key := range r.samples {
 		if !existingPods[key] {
 			delete(r.samples, key)
@@ -191,4 +260,3 @@ func (r *Reader) Cleanup(existingPods map[string]bool) {
 		}
 	}
 }
-

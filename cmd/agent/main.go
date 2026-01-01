@@ -12,6 +12,13 @@ import (
 )
 
 func main() {
+	// FIXED: Initialize klog flags BEFORE flag.Parse() so -v flag works
+	klog.InitFlags(nil)
+	// Default to verbose (v=5) so demand sampling shows in logs unless explicitly overridden
+	if vFlag := flag.Lookup("v"); vFlag != nil {
+		_ = vFlag.Value.Set("5")
+	}
+
 	var nodeName string
 	flag.StringVar(&nodeName, "node-name", "", "Name of the node this agent runs on (required)")
 	flag.Parse()
@@ -43,9 +50,8 @@ func main() {
 	}
 
 	// Run agent
-	klog.Infof("Starting node agent on node %s", nodeName)
+	klog.InfoS("Starting node agent", "node", nodeName, "verbosity", klog.V(5).Enabled())
 	if err := agent.Run(); err != nil {
 		klog.Fatalf("Agent error: %v", err)
 	}
 }
-
