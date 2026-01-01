@@ -67,6 +67,56 @@ func NewReader() (*Reader, error) {
 	}, nil
 }
 
+// ValidateAccess attempts to detect cgroups for at least one running container.
+// Returns nil if cgroup detection is working, error otherwise.
+// This should be called at agent startup to fail fast if the environment is broken.
+func (r *Reader) ValidateAccess() error {
+	entries, err := os.ReadDir(CgroupV2BasePath)
+	if err != nil {
+		return fmt.Errorf("cannot read cgroup base path %s: %w", CgroupV2BasePath, err)
+	}
+
+	hasKubepods := false
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "kubepods") {
+			hasKubepods = true
+			break
+		}
+	}
+
+	if !hasKubepods {
+		return fmt.Errorf("no kubepods cgroup hierarchy found in %s; found: %v", CgroupV2BasePath, directoryNames(entries))
+	}
+
+	pattern := filepath.Join(CgroupV2BasePath, "kubepods*", "**", CPUStatFile)
+	matches, globErr := filepath.Glob(pattern)
+	if globErr != nil {
+		klog.V(4).InfoS("Glob pattern failed, trying alternative", "error", globErr)
+	}
+
+	if len(matches) == 0 {
+		pattern = filepath.Join(CgroupV2BasePath, "kubepods*", "*", "*", CPUStatFile)
+		matches, _ = filepath.Glob(pattern)
+	}
+
+	if len(matches) == 0 {
+		return fmt.Errorf("no cpu.stat files found in kubepods hierarchy; cgroup detection will not work")
+	}
+
+	klog.InfoS("Cgroup validation passed", "cpuStatFilesFound", len(matches))
+	return nil
+}
+
+func directoryNames(entries []os.DirEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
 // ReadPodDemand reads the demand signal for a pod from its cgroup.
 // Returns a normalized demand value in [0, 1] based on throttling ratio.
 //

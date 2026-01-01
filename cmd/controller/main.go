@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,12 @@ func init() {
 }
 
 func main() {
+	fmt.Println("================================================================================")
+	fmt.Println("  MBCAS Controller")
+	fmt.Println("  WARNING: This is a demonstration system. Do not use in production.")
+	fmt.Println("================================================================================")
+	fmt.Println()
+
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string

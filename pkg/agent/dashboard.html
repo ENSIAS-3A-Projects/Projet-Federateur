@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MBCAS Dashboard</title>
+  <style>
+    :root {
+      --bg: #0e1116;
+      --panel: #161b22;
+      --accent: #3dd6d0;
+      --warn: #ff6b6b;
+      --text: #e9eef5;
+      --muted: #8da2b8;
+      --grid: rgba(255, 255, 255, 0.05);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 20% 20%, rgba(61,214,208,0.08), transparent 30%),
+                  radial-gradient(circle at 80% 10%, rgba(255,107,107,0.08), transparent 28%),
+                  var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "Helvetica Neue", "Liberation Sans", sans-serif;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .title {
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .banner {
+      background: linear-gradient(90deg, rgba(255,107,107,0.15), rgba(255,107,107,0.05));
+      border: 1px solid rgba(255,107,107,0.4);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+    }
+    .label { color: var(--muted); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+    .value { font-size: 20px; font-weight: 700; margin-top: 6px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 8px 6px; font-size: 13px; }
+    th { color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--grid); }
+    tr:nth-child(odd) { background: rgba(255,255,255,0.03); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .footer { margin-top: 16px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">MBCAS Dashboard</div>
+      <div class="subtitle">Market-Based CPU Allocation (demo only)</div>
+    </div>
+    <div class="banner">WARNING: Demonstration system only. Do not use in production.</div>
+  </header>
+
+  <div class="grid" id="summary">
+    <div class="card"><div class="label">Health</div><div class="value" id="health">—</div></div>
+    <div class="card"><div class="label">Pods Tracked</div><div class="value" id="pods">—</div></div>
+    <div class="card"><div class="label">Last Sample</div><div class="value" id="lastSample">—</div></div>
+    <div class="card"><div class="label">Last Write</div><div class="value" id="lastWrite">—</div></div>
+    <div class="card"><div class="label">Mode</div><div class="value" id="mode">—</div></div>
+    <div class="card"><div class="label">Uptime</div><div class="value" id="uptime">—</div></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Quick Links</div>
+    <div style="margin-top:6px; display:flex; gap:12px; flex-wrap:wrap;">
+      <a href="/healthz" target="_blank">/healthz</a>
+      <a href="/readyz" target="_blank">/readyz</a>
+      <a href="/metrics" target="_blank">/metrics</a>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <div class="label">Recent Demand Samples</div>
+    <table id="samples">
+      <thead><tr><th>Pod</th><th>Namespace</th><th>Raw</th><th>Smoothed</th></tr></thead>
+      <tbody id="sampleRows"><tr><td colspan="4">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="footer">Data refreshes every 2s from /healthz and in-memory samples; metrics are exposed at /metrics.</div>
+
+  <script>
+    async function fetchHealth() {
+      const res = await fetch('/healthz');
+      if (!res.ok) throw new Error('health fetch failed');
+      return res.json();
+    }
+
+    // This demo keeps the last few samples client-side only
+    const sampleBuffer = [];
+    const maxSamples = 8;
+
+    function recordSample(status) {
+      sampleBuffer.push({
+        pod: `n/a`,
+        ns: `tracked:${status.podsTracked}`,
+        raw: '—',
+        smooth: '—'
+      });
+      if (sampleBuffer.length > maxSamples) sampleBuffer.shift();
+    }
+
+    function render(status) {
+      document.getElementById('health').textContent = status.healthy ? 'Healthy' : 'Unhealthy';
+      document.getElementById('pods').textContent = status.podsTracked;
+      document.getElementById('lastSample').textContent = status.lastSampleTime || '—';
+      document.getElementById('lastWrite').textContent = status.lastWriteTime || '—';
+      document.getElementById('mode').textContent = status.healthy ? 'Active' : 'Degraded';
+      document.getElementById('uptime').textContent = status.uptime;
+
+      const tbody = document.getElementById('sampleRows');
+      tbody.innerHTML = '';
+      if (sampleBuffer.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No samples yet</td></tr>';
+      } else {
+        sampleBuffer.slice().reverse().forEach(s => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${s.pod}</td><td>${s.ns}</td><td>${s.raw}</td><td>${s.smooth}</td>`;
+          tbody.appendChild(tr);
+        });
+      }
+    }
+
+    async function update() {
+      try {
+        const status = await fetchHealth();
+        recordSample(status);
+        render(status);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    update();
+    setInterval(update, 2000);
+  </script>
+</body>
+</html>

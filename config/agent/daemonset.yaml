@@ -40,6 +40,22 @@ spec:
         - /agent
         - --node-name=$(NODE_NAME)
         - -v=5
+        ports:
+        - name: health
+          containerPort: 8082
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 5
         env:
         - name: NODE_NAME
           valueFrom:

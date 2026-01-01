@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	"k8s.io/client-go/kubernetes"
@@ -12,6 +13,12 @@ import (
 )
 
 func main() {
+	fmt.Println("================================================================================")
+	fmt.Println("  MBCAS - Market-Based CPU Allocation System")
+	fmt.Println("  WARNING: This is a demonstration system. Do not use in production.")
+	fmt.Println("================================================================================")
+	fmt.Println()
+
 	// FIXED: Initialize klog flags BEFORE flag.Parse() so -v flag works
 	klog.InitFlags(nil)
 	// Default to verbose (v=5) so demand sampling shows in logs unless explicitly overridden

@@ -1,0 +1,31 @@
+# Service D: Well-configured (control)
+# Requests = Limits = Usage
+# Demonstrates baseline behavior
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service-d-control
+  namespace: demo-workloads
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: service-d
+  template:
+    metadata:
+      labels:
+        app: service-d
+        demo-role: control
+    spec:
+      containers:
+      - name: workload
+        image: busybox:1.36
+        # Steady 300m usage
+        command: ["sh", "-c", "while true; do timeout 0.3 sh -c 'while true; do :; done'; sleep 0.7; done"]
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "500m"
+            memory: "128Mi"

@@ -2,13 +2,25 @@ package demand
 
 // Package demand implements demand signal tracking and smoothing.
 
+import "time"
+
 // Tracker tracks and smooths demand signals using exponential moving average.
 // Implements "fast up, slow down" behavior to avoid oscillations.
 type Tracker struct {
 	smoothed float64
 	// Track consecutive zero readings for faster decay
 	zeroCount int
+
+	// Failure tracking
+	consecutiveFailures int
+	lastFailureTime     time.Time
+	totalFailures       int64
 }
+
+const (
+	// MaxConsecutiveFailures before demand is forced to zero
+	MaxConsecutiveFailures = 3
+)
 
 // NewTracker creates a new demand tracker.
 func NewTracker() *Tracker {
@@ -72,4 +84,24 @@ func (t *Tracker) Current() float64 {
 // Reset resets the tracker to zero.
 func (t *Tracker) Reset() {
 	t.smoothed = 0.0
+}
+
+// RecordFailure records a cgroup read failure.
+// Returns true if demand should be treated as zero (sustained failure).
+func (t *Tracker) RecordFailure() bool {
+	t.consecutiveFailures++
+	t.totalFailures++
+	t.lastFailureTime = time.Now()
+
+	return t.consecutiveFailures >= MaxConsecutiveFailures
+}
+
+// RecordSuccess resets the failure counter on successful read.
+func (t *Tracker) RecordSuccess() {
+	t.consecutiveFailures = 0
+}
+
+// FailureStats returns failure statistics for observability.
+func (t *Tracker) FailureStats() (consecutive int, total int64) {
+	return t.consecutiveFailures, t.totalFailures
 }

@@ -18,6 +18,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -50,6 +51,11 @@ const (
 
 	// BaselineCPUPerPod is the minimum CPU to allocate per pod.
 	BaselineCPUPerPod = "100m"
+
+	// StartupGracePeriod is the duration after startup during which
+	// allocations are only allowed to increase, not decrease.
+	// This prevents incorrect scale-downs when demand history is lost.
+	StartupGracePeriod = 45 * time.Second
 )
 
 // Agent is the main node agent that senses kernel demand and writes allocations.
@@ -60,15 +66,23 @@ type Agent struct {
 	cancel    context.CancelFunc
 
 	// State
-	podDemands  map[types.UID]*demand.Tracker
-	allocations map[types.UID]string // pod UID -> current allocation
-	mu          sync.RWMutex
+	podDemands     map[types.UID]*demand.Tracker
+	allocations    map[types.UID]string // pod UID -> current allocation
+	originalLimits map[types.UID]int64  // pod UID -> original CPU limit in millicores (preserved across resizes)
+	mu             sync.RWMutex
+
+	// Startup grace period tracking
+	startTime       time.Time
+	gracePeriodDone bool
 
 	// Components
 	cgroupReader *cgroup.Reader
 	demandCalc   *demand.Calculator
 	writer       *Writer
 	restConfig   *rest.Config
+
+	healthServer *HealthServer
+	previousMode allocation.AllocationMode
 }
 
 // NewAgent creates a new node agent.
@@ -81,6 +95,12 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 		return nil, fmt.Errorf("create cgroup reader: %w", err)
 	}
 
+	// Validate cgroup access before proceeding
+	if err := cgroupReader.ValidateAccess(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("cgroup validation failed: %w", err)
+	}
+
 	demandCalc := demand.NewCalculator()
 
 	writer, err := NewWriter(restConfig)
@@ -89,23 +109,35 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 		return nil, fmt.Errorf("create writer: %w", err)
 	}
 
-	return &Agent{
-		k8sClient:    k8sClient,
-		nodeName:     nodeName,
-		ctx:          ctx,
-		cancel:       cancel,
-		podDemands:   make(map[types.UID]*demand.Tracker),
-		allocations:  make(map[types.UID]string),
-		cgroupReader: cgroupReader,
-		demandCalc:   demandCalc,
-		writer:       writer,
-		restConfig:   restConfig,
-	}, nil
+	agent := &Agent{
+		k8sClient:      k8sClient,
+		nodeName:       nodeName,
+		ctx:            ctx,
+		cancel:         cancel,
+		podDemands:     make(map[types.UID]*demand.Tracker),
+		allocations:    make(map[types.UID]string),
+		originalLimits: make(map[types.UID]int64),
+		cgroupReader:   cgroupReader,
+		demandCalc:     demandCalc,
+		writer:         writer,
+		restConfig:     restConfig,
+		startTime:      time.Now(),
+		healthServer:   nil,
+	}
+
+	agent.healthServer = NewHealthServer(agent)
+
+	return agent, nil
 }
 
 // Run starts the agent's main loop.
 func (a *Agent) Run() error {
 	klog.InfoS("Starting node agent", "node", a.nodeName)
+
+	if a.healthServer != nil {
+		a.healthServer.SetCgroupStatus("ok")
+		a.healthServer.Start(8082)
+	}
 
 	// Start sampling loop
 	go a.samplingLoop()
@@ -135,6 +167,8 @@ func (a *Agent) samplingLoop() {
 		case <-ticker.C:
 			if err := a.sample(); err != nil {
 				klog.ErrorS(err, "Sampling error")
+			} else if a.healthServer != nil {
+				a.healthServer.RecordSample()
 			}
 		}
 	}
@@ -158,13 +192,22 @@ func (a *Agent) sample() error {
 	for _, pod := range pods {
 		seen[pod.UID] = true
 
+		// Capture original limit on first discovery (before any MBCAS modifications)
+		a.mu.Lock()
+		if _, hasOriginal := a.originalLimits[pod.UID]; !hasOriginal {
+			if len(pod.Spec.Containers) > 0 {
+				if limitCPU, ok := pod.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; ok {
+					a.originalLimits[pod.UID] = limitCPU.MilliValue()
+					klog.InfoS("Captured original CPU limit for pod",
+						"pod", pod.Name, "namespace", pod.Namespace,
+						"originalLimitMilli", a.originalLimits[pod.UID])
+				}
+			}
+		}
+		a.mu.Unlock()
+
 		// Read demand signal from cgroup
 		rawDemand, err := a.cgroupReader.ReadPodDemand(pod)
-		if err != nil {
-			klog.V(4).InfoS("Failed to read pod demand", "pod", pod.Name, "namespace", pod.Namespace, "error", err)
-			// Set demand to 0 if we can't read it
-			rawDemand = 0.0
-		}
 
 		// Update demand tracker (applies smoothing)
 		a.mu.Lock()
@@ -173,8 +216,36 @@ func (a *Agent) sample() error {
 			tracker = demand.NewTracker()
 			a.podDemands[pod.UID] = tracker
 		}
+
+		if err != nil {
+			shouldZero := tracker.RecordFailure()
+			consecutive, total := tracker.FailureStats()
+
+			if shouldZero {
+				klog.ErrorS(err, "Sustained cgroup read failure, treating demand as zero",
+					"pod", pod.Name,
+					"namespace", pod.Namespace,
+					"consecutiveFailures", consecutive,
+					"totalFailures", total)
+				rawDemand = 0.0
+			} else {
+				klog.V(2).InfoS("Transient cgroup read failure, retaining previous demand",
+					"pod", pod.Name,
+					"namespace", pod.Namespace,
+					"consecutiveFailures", consecutive,
+					"totalFailures", total,
+					"error", err)
+				a.mu.Unlock()
+				continue
+			}
+		} else {
+			tracker.RecordSuccess()
+		}
+
 		smoothedDemand := tracker.Update(rawDemand)
 		a.mu.Unlock()
+
+		RecordDemand(pod.Namespace, pod.Name, rawDemand, smoothedDemand)
 
 		// Log at info level so demand visibility is always on during demo
 		klog.InfoS("Pod demand sample", "pod", pod.Name, "namespace", pod.Namespace,
@@ -187,6 +258,7 @@ func (a *Agent) sample() error {
 		if !seen[uid] {
 			delete(a.podDemands, uid)
 			delete(a.allocations, uid)
+			delete(a.originalLimits, uid)
 			klog.V(4).InfoS("Removed pod from tracking", "podUID", uid)
 		}
 	}
@@ -207,6 +279,8 @@ func (a *Agent) writingLoop() {
 		case <-ticker.C:
 			if err := a.writeAllocations(); err != nil {
 				klog.ErrorS(err, "Writing allocations error")
+			} else if a.healthServer != nil {
+				a.healthServer.RecordWrite()
 			}
 		}
 	}
@@ -230,6 +304,7 @@ func (a *Agent) writeAllocations() error {
 	// Reserve system CPU
 	systemReserve := nodeCapacity * SystemReservePercent / 100.0
 	availableCPU := nodeCapacity - systemReserve
+	availableMilli := int64(availableCPU * 1000)
 
 	// Collect current demands
 	a.mu.RLock()
@@ -257,7 +332,59 @@ func (a *Agent) writeAllocations() error {
 	}
 
 	// Compute allocations using market-clearing (Phase 4)
-	allocations := a.computeAllocations(demands, availableCPU, podMap, nodeCapacity)
+	result, allocations, podParams := a.computeAllocations(demands, availableCPU, podMap, nodeCapacity)
+
+	// Mode transition logging
+	if result.Mode != a.previousMode {
+		klog.InfoS("Allocation mode changed",
+			"previous", a.previousMode,
+			"current", result.Mode,
+			"totalNeed", result.TotalNeed,
+			"capacity", availableMilli)
+		a.previousMode = result.Mode
+	}
+
+	// Record system metrics
+	modeInt := 0
+	switch result.Mode {
+	case allocation.ModeUncongested:
+		modeInt = 0
+	case allocation.ModeCongested:
+		modeInt = 1
+	case allocation.ModeOverloaded:
+		modeInt = 2
+	}
+
+	nashProductLog := 0.0
+	for uid, allocMilli := range result.Allocations {
+		baseline := podParams[uid].MinMilli
+		surplus := allocMilli - baseline
+		if surplus > 0 {
+			nashProductLog += math.Log(float64(surplus))
+		}
+	}
+
+	RecordSystemMetrics(a.nodeName, modeInt, nashProductLog, result.TotalNeed, result.TotalAlloc, availableMilli)
+
+	// Log decisions and record metrics before writing
+	for uid, cpuAllocation := range allocations {
+		pod := podMap[uid]
+		params := podParams[uid]
+		need := result.Needs[uid]
+		if pod != nil {
+			RecordAllocation(pod.Namespace, pod.Name, result.Allocations[uid], need)
+			klog.InfoS("Allocation decision",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"demand", fmt.Sprintf("%.3f", params.Demand),
+				"weight", params.Weight,
+				"min", params.MinMilli,
+				"max", params.MaxMilli,
+				"need", need,
+				"allocation", cpuAllocation,
+				"mode", result.Mode)
+		}
+	}
 
 	// Write allocations
 	for uid, cpuAllocation := range allocations {
@@ -265,6 +392,23 @@ func (a *Agent) writeAllocations() error {
 		if !exists {
 			klog.V(4).InfoS("Pod not found, skipping allocation", "podUID", uid)
 			continue
+		}
+
+		// Grace period protection: do not decrease allocations during startup
+		if a.isInGracePeriod() {
+			currentLimit, err := extractCurrentCPULimit(pod)
+			if err == nil {
+				currentMilli := parseCPUToMilli(currentLimit)
+				desiredMilli := parseCPUToMilli(cpuAllocation)
+				if desiredMilli < currentMilli {
+					klog.InfoS("Grace period: preventing allocation decrease",
+						"pod", pod.Name,
+						"namespace", pod.Namespace,
+						"current", currentLimit,
+						"desired", cpuAllocation)
+					continue
+				}
+			}
 		}
 
 		// Check if change is significant
@@ -353,7 +497,7 @@ func (a *Agent) computeAllocations(
 	availableCPU float64,
 	podMap map[types.UID]*corev1.Pod,
 	nodeCapacity float64,
-) map[types.UID]string {
+) (allocation.AllocationResult, map[types.UID]string, map[types.UID]allocation.PodParams) {
 	// Parse baseline once (not in hot loop)
 	baselineQty, _ := resource.ParseQuantity(BaselineCPUPerPod)
 	baselineMilli := baselineQty.MilliValue()
@@ -364,6 +508,7 @@ func (a *Agent) computeAllocations(
 
 	// Build PodParams for each pod
 	podParams := make(map[types.UID]allocation.PodParams)
+	a.mu.RLock()
 	for uid, demand := range demands {
 		pod, exists := podMap[uid]
 		if !exists {
@@ -371,19 +516,37 @@ func (a *Agent) computeAllocations(
 		}
 
 		params := a.demandCalc.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
+
+		// Override MaxMilli with original limit if we have it stored
+		// This prevents feedback loop where applied limits become new max
+		if originalLimit, hasOriginal := a.originalLimits[uid]; hasOriginal && originalLimit > 0 {
+			// Use original limit as max, but cap at 90% node capacity
+			perPodMaxCap := int64(float64(nodeCapMilli) * 0.9)
+			if originalLimit > perPodMaxCap {
+				params.MaxMilli = perPodMaxCap
+			} else {
+				params.MaxMilli = originalLimit
+			}
+			// Ensure max >= min
+			if params.MaxMilli < params.MinMilli {
+				params.MaxMilli = params.MinMilli
+			}
+		}
+
 		podParams[uid] = params
 	}
+	a.mu.RUnlock()
 
 	// Clear market using Phase 4 solver
-	allocationsMilli := allocation.ClearMarket(availableMilli, podParams)
+	result := allocation.ClearMarketWithMetadata(availableMilli, podParams)
 
 	// Convert to string format ("${m}m")
 	allocations := make(map[types.UID]string)
-	for uid, milli := range allocationsMilli {
+	for uid, milli := range result.Allocations {
 		allocations[uid] = fmt.Sprintf("%dm", milli)
 	}
 
-	return allocations
+	return result, allocations, podParams
 }
 
 // extractNodeCPUCapacity extracts CPU capacity from node status.
@@ -395,6 +558,45 @@ func extractNodeCPUCapacity(node *corev1.Node) (float64, error) {
 
 	cpuMilli := cpuStr.MilliValue()
 	return float64(cpuMilli) / 1000.0, nil
+}
+
+// isInGracePeriod returns true if the agent is still in the startup grace period.
+// During this period, allocations should only increase, not decrease.
+func (a *Agent) isInGracePeriod() bool {
+	if a.gracePeriodDone {
+		return false
+	}
+
+	if time.Since(a.startTime) > StartupGracePeriod {
+		a.gracePeriodDone = true
+		klog.InfoS("Startup grace period ended", "duration", StartupGracePeriod)
+		return false
+	}
+
+	return true
+}
+
+// extractCurrentCPULimit gets the current CPU limit from pod spec.
+func extractCurrentCPULimit(pod *corev1.Pod) (string, error) {
+	if len(pod.Spec.Containers) == 0 {
+		return "", fmt.Errorf("pod has no containers")
+	}
+
+	container := pod.Spec.Containers[0]
+	if limit, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+		return limit.String(), nil
+	}
+
+	return "", fmt.Errorf("no CPU limit set")
+}
+
+// parseCPUToMilli converts a CPU string like "500m" or "1" to millicores.
+func parseCPUToMilli(cpu string) int64 {
+	qty, err := resource.ParseQuantity(cpu)
+	if err != nil {
+		return 0
+	}
+	return qty.MilliValue()
 }
 
 // shouldWrite checks if the change is significant enough to write.

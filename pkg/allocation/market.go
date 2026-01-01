@@ -34,6 +34,7 @@ type AllocationResult struct {
 	Mode        AllocationMode
 	TotalNeed   int64
 	TotalAlloc  int64
+	Needs       map[types.UID]int64
 }
 
 // PodParams represents market parameters for a pod.
@@ -48,10 +49,10 @@ type PodParams struct {
 // ClearMarket performs demand-capped allocation.
 //
 // This replaces the original fair-share algorithm with:
-//   1. Compute "need" for each pod based on demand signal
-//   2. If total need <= capacity: give everyone their need (uncongested)
-//   3. If total need > capacity: apply Nash bargaining reduction (congested)
-//   4. If total baselines > capacity: scale baselines (overloaded)
+//  1. Compute "need" for each pod based on demand signal
+//  2. If total need <= capacity: give everyone their need (uncongested)
+//  3. If total need > capacity: apply Nash bargaining reduction (congested)
+//  4. If total baselines > capacity: scale baselines (overloaded)
 //
 // Returns allocations in millicores (int64).
 func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams) map[types.UID]int64 {
@@ -65,6 +66,7 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 		return AllocationResult{
 			Allocations: make(map[types.UID]int64),
 			Mode:        ModeUncongested,
+			Needs:       make(map[types.UID]int64),
 		}
 	}
 
@@ -92,6 +94,7 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 			Mode:        ModeOverloaded,
 			TotalNeed:   totalNeed,
 			TotalAlloc:  totalAlloc,
+			Needs:       needs,
 		}
 	}
 
@@ -107,6 +110,7 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 			Mode:        ModeCongested,
 			TotalNeed:   totalNeed,
 			TotalAlloc:  totalAlloc,
+			Needs:       needs,
 		}
 	}
 
@@ -117,16 +121,12 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 		Mode:        ModeUncongested,
 		TotalNeed:   totalNeed,
 		TotalAlloc:  totalNeed, // In uncongested mode, alloc = need
+		Needs:       needs,
 	}
 }
 
 // computeNeed estimates CPU required to eliminate throttling for a pod.
-//
-// The demand signal [0,1] maps to CPU need:
-//   demand=0.0 → not throttling → need = baseline + small headroom
-//   demand=0.5 → moderate throttling → need = midpoint of range + headroom
-//   demand=1.0 → severe throttling → need = max (give everything)
-//
+// See THEORY.md section "Need Estimation" for the formal definition.
 // Headroom scales with demand: 10% at zero demand, up to 25% at full demand.
 // This ensures pods under stress get extra buffer.
 func computeNeed(p PodParams) int64 {
@@ -170,15 +170,8 @@ func computeNeed(p PodParams) int64 {
 }
 
 // nashReduce applies Nash Bargaining Solution when total need > capacity.
-//
-// Algorithm:
-//   1. Everyone keeps their baseline (MinMilli) - the "disagreement point"
-//   2. Surplus demand (need - baseline) is the negotiable portion
-//   3. Available surplus = capacity - total baselines
-//   4. Each pod gets: baseline + (surplus * reduction_ratio)
-//
-// This maximizes the Nash product: Π(allocation_i - baseline_i)
-// which is equivalent to proportional reduction of surplus.
+// See THEORY.md section "Congested Mode" and "Nash bargaining" mapping.
+// Surplus is reduced proportionally to maximize the Nash product.
 func nashReduce(needs map[types.UID]int64, pods map[types.UID]PodParams, capacity int64) map[types.UID]int64 {
 	allocations := make(map[types.UID]int64)
 
@@ -272,8 +265,7 @@ func nashReduce(needs map[types.UID]int64, pods map[types.UID]PodParams, capacit
 }
 
 // scaleBaselines handles the overloaded case when total baselines > capacity.
-// This is an emergency mode indicating severe over-commitment.
-//
+// See THEORY.md section "Overloaded Mode" for formal definition.
 // All baselines are scaled proportionally to fit within capacity.
 func scaleBaselines(pods map[types.UID]PodParams, capacity int64) map[types.UID]int64 {
 	allocations := make(map[types.UID]int64)

@@ -31,8 +31,9 @@ const (
 	ResizeCooldown = 10 * time.Second
 
 	// MaxStepSizeFactor is the maximum factor by which CPU can change per resize.
-	// Symmetric: both increases and decreases are limited to 3x to make demo scaling visible.
-	MaxStepSizeFactor = 3.0
+	// Set high (10x) for demo to allow large decreases for idle pods.
+	// In production, use 2-3x with graduated stepping.
+	MaxStepSizeFactor = 10.0
 
 	// DefaultCPULimit is used when a pod has no CPU limit defined.
 	// With LimitRange policy, this should rarely be needed.
