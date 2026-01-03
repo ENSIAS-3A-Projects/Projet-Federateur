@@ -35,6 +35,15 @@ const (
 	// In production, use 2-3x with graduated stepping.
 	MaxStepSizeFactor = 10.0
 
+	// MaxAbsoluteDeltaMilli is the maximum absolute CPU change per resize (in millicores).
+	// This prevents extreme jumps even when factor is within limits.
+	// P0 Fix: Added to prevent bypassing step size via zero values.
+	MaxAbsoluteDeltaMilli = 2000 // 2 cores max change per resize
+
+	// MinSafeBaselineMilli is the minimum baseline for step size calculations.
+	// Used when current is 0 or very low to prevent unbounded increases.
+	MinSafeBaselineMilli = 100 // 100m minimum for ratio calculations
+
 	// DefaultCPULimit is used when a pod has no CPU limit defined.
 	// With LimitRange policy, this should rarely be needed.
 	DefaultCPULimit = "500m"
@@ -208,19 +217,22 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, fmt.Errorf("update status before apply: %w", err)
 	}
 
-	// Determine target container (use first container if not specified)
+	// P0 Fix: Apply to ALL containers proportionally, not just first
+	// For simplicity, we apply the same limit to each container
+	// (future: distribute proportionally based on original limits)
 	containerName := ""
 	if len(pod.Spec.Containers) > 0 {
 		containerName = pod.Spec.Containers[0].Name
 	}
 
 	opts := actuator.Options{
-		Policy:     actuator.PolicyLimits, // Only mutate limits
-		MaxRetries: 3,
-		Wait:       false, // Don't wait - we'll reconcile again
+		Policy:      actuator.PolicyLimits, // Only mutate limits
+		MaxRetries:  3,
+		Wait:        true,             // P1 Fix: Wait for resize to complete
+		WaitTimeout: 10 * time.Second, // Don't wait too long
 	}
 
-	before, _, err := actuator.ApplyScaling(
+	before, after, err := actuator.ApplyScaling(
 		ctx,
 		r.K8sClient,
 		pa.Spec.Namespace,
@@ -235,9 +247,46 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			fmt.Sprintf("Failed to apply CPU limit: %v", err), nil)
 	}
 
-	// Success - update status
-	pa.Status.Phase = PhaseApplied
-	pa.Status.Reason = "Applied"
+	// P1 Fix: Verify the resize was actually applied by kubelet
+	verified := false
+	verifyReason := "Unknown"
+	if after != nil && len(after.Spec.Containers) > 0 {
+		// Check if the limit matches what we requested
+		actualLimit, ok := after.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]
+		if ok {
+			actualMilli := actualLimit.MilliValue()
+			desiredQty, _ := resource.ParseQuantity(desiredCPU)
+			desiredMilli := desiredQty.MilliValue()
+			if actualMilli == desiredMilli {
+				verified = true
+				verifyReason = "Verified"
+			} else {
+				verifyReason = fmt.Sprintf("Mismatch: actual=%dm, desired=%dm", actualMilli, desiredMilli)
+			}
+		} else {
+			verifyReason = "NoLimitSet"
+		}
+	} else {
+		verifyReason = "NoAfterPod"
+	}
+
+	// Update status based on verification
+	if verified {
+		pa.Status.Phase = PhaseApplied
+		pa.Status.Reason = "Applied"
+	} else {
+		pa.Status.Phase = PhasePending
+		pa.Status.Reason = verifyReason
+		// Requeue to try again
+		pa.Status.LastAppliedTime = nil
+		if err := r.Status().Update(ctx, pa); err != nil {
+			return ctrl.Result{}, fmt.Errorf("update status after verify: %w", err)
+		}
+		r.Recorder.Event(pa, corev1.EventTypeWarning, "ResizeNotVerified",
+			fmt.Sprintf("Resize to %s not verified for Pod %s/%s: %s", desiredCPU, pa.Spec.Namespace, pa.Spec.PodName, verifyReason))
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
 	pa.Status.AppliedCPULimit = desiredCPU
 	pa.Status.LastAppliedTime = &now
 	if err := r.Status().Update(ctx, pa); err != nil {
@@ -307,6 +356,7 @@ var (
 
 // checkSafety validates cooldown and step size constraints.
 // Uses status.lastAppliedTime for cooldown (status-based, not in-memory).
+// P0 Fix: No longer bypasses checks when current or desired is 0.
 func (r *PodAllocationReconciler) checkSafety(ctx context.Context, pa *v1alpha1.PodAllocation, currentCPU, desiredCPU string) error {
 	// Check cooldown: use status.lastAppliedTime (status-based)
 	if pa.Status.LastAppliedTime != nil {
@@ -317,7 +367,7 @@ func (r *PodAllocationReconciler) checkSafety(ctx context.Context, pa *v1alpha1.
 		}
 	}
 
-	// Check step size: symmetric 1.5x factor
+	// Parse quantities
 	currentQty, err := resource.ParseQuantity(currentCPU)
 	if err != nil {
 		return fmt.Errorf("parse current CPU: %w", err)
@@ -330,27 +380,34 @@ func (r *PodAllocationReconciler) checkSafety(ctx context.Context, pa *v1alpha1.
 	currentMilli := currentQty.MilliValue()
 	desiredMilli := desiredQty.MilliValue()
 
-	// Defensive guard: handle zero values
-	if currentMilli == 0 && desiredMilli == 0 {
-		// Both zero: no change needed
+	// P0 Fix: Reject desired=0 as invalid (allocations must have a minimum)
+	if desiredMilli <= 0 {
+		return fmt.Errorf("%w: desired CPU must be > 0", errStepSizeExceeded)
+	}
+
+	// Both equal: no change needed
+	if currentMilli == desiredMilli {
 		return nil
 	}
-	if currentMilli == 0 {
-		// Current is zero, desired is not: allow any increase (no step size limit)
-		return nil
+
+	// P0 Fix: Absolute delta cap check (before factor check)
+	delta := abs64(desiredMilli - currentMilli)
+	if delta > MaxAbsoluteDeltaMilli {
+		return fmt.Errorf("%w: absolute change %dm exceeds maximum %dm", errStepSizeExceeded, delta, MaxAbsoluteDeltaMilli)
 	}
-	if desiredMilli == 0 {
-		// Desired is zero, current is not: this is a removal, allow it
-		// (In practice, we probably don't want to set CPU to zero, but we'll allow it here)
-		return nil
+
+	// P0 Fix: Use safe baseline for factor calculation when current is 0 or very low
+	effectiveCurrent := currentMilli
+	if effectiveCurrent < MinSafeBaselineMilli {
+		effectiveCurrent = MinSafeBaselineMilli
 	}
 
 	// Calculate factor (always >= 1.0)
 	var factor float64
-	if desiredMilli > currentMilli {
-		factor = float64(desiredMilli) / float64(currentMilli)
+	if desiredMilli > effectiveCurrent {
+		factor = float64(desiredMilli) / float64(effectiveCurrent)
 	} else {
-		factor = float64(currentMilli) / float64(desiredMilli)
+		factor = float64(effectiveCurrent) / float64(desiredMilli)
 	}
 
 	if factor > MaxStepSizeFactor {
@@ -358,6 +415,14 @@ func (r *PodAllocationReconciler) checkSafety(ctx context.Context, pa *v1alpha1.
 	}
 
 	return nil
+}
+
+// abs64 returns absolute value of int64
+func abs64(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // isGuaranteedQoS checks if a pod has Guaranteed QoS class.

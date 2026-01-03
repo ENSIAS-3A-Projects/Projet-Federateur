@@ -1,8 +1,0 @@
-# Demo namespace with MBCAS management enabled
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: demo
-  labels:
-    mbcas.io/managed: "true"
-    app.kubernetes.io/part-of: mbcas-demo

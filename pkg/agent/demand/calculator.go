@@ -42,8 +42,11 @@ func (c *Calculator) ParamsForPod(
 		demand = 1
 	}
 
-	if len(pod.Spec.Containers) == 0 {
-		// Fallback for pods with no containers
+	// P0 Fix: Support multi-container pods by aggregating resources
+	// across all non-init, non-ephemeral containers.
+	containers := filterNormalContainers(pod)
+	if len(containers) == 0 {
+		// Fallback for pods with no normal containers
 		return allocation.PodParams{
 			Demand:   demand,
 			Bid:      1.0 * demand, // Default weight = 1
@@ -53,20 +56,16 @@ func (c *Calculator) ParamsForPod(
 		}
 	}
 
-	container := pod.Spec.Containers[0]
-
-	// Extract request CPU (for weight and min)
+	// Sum request and limit CPU across all normal containers
 	requestMilli := int64(0)
-	if requestCPU, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
-		// MilliValue() is a method on resource.Quantity
-		requestMilli = requestCPU.MilliValue()
-	}
-
-	// Extract limit CPU (for max)
 	limitMilli := int64(0)
-	if limitCPU, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
-		// MilliValue() has pointer receiver, but Go auto-dereferences
-		limitMilli = limitCPU.MilliValue()
+	for _, container := range containers {
+		if requestCPU, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+			requestMilli += requestCPU.MilliValue()
+		}
+		if limitCPU, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			limitMilli += limitCPU.MilliValue()
+		}
 	}
 
 	// Compute weight: max(1, requestCPU_milli)
@@ -114,4 +113,13 @@ func (c *Calculator) ParamsForPod(
 		MaxMilli: maxMilli,
 		Weight:   weight,
 	}
+}
+
+// filterNormalContainers returns only non-init, non-ephemeral containers.
+// P1 Fix: Explicitly filter out init and ephemeral containers.
+func filterNormalContainers(pod *corev1.Pod) []corev1.Container {
+	return pod.Spec.Containers // Spec.Containers only contains normal containers
+	// Note: InitContainers are in pod.Spec.InitContainers
+	// EphemeralContainers are in pod.Spec.EphemeralContainers
+	// Neither are included in pod.Spec.Containers by Kubernetes design.
 }

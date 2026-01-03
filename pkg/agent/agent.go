@@ -192,16 +192,22 @@ func (a *Agent) sample() error {
 	for _, pod := range pods {
 		seen[pod.UID] = true
 
-		// Capture original limit on first discovery (before any MBCAS modifications)
+		// P0/P1 Fix: Capture original limit on first discovery (before any MBCAS modifications)
+		// Sum limits across all normal containers (not init/ephemeral)
 		a.mu.Lock()
 		if _, hasOriginal := a.originalLimits[pod.UID]; !hasOriginal {
-			if len(pod.Spec.Containers) > 0 {
-				if limitCPU, ok := pod.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; ok {
-					a.originalLimits[pod.UID] = limitCPU.MilliValue()
-					klog.InfoS("Captured original CPU limit for pod",
-						"pod", pod.Name, "namespace", pod.Namespace,
-						"originalLimitMilli", a.originalLimits[pod.UID])
+			totalLimitMilli := int64(0)
+			for _, container := range pod.Spec.Containers {
+				if limitCPU, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+					totalLimitMilli += limitCPU.MilliValue()
 				}
+			}
+			if totalLimitMilli > 0 {
+				a.originalLimits[pod.UID] = totalLimitMilli
+				klog.InfoS("Captured original CPU limit for pod",
+					"pod", pod.Name, "namespace", pod.Namespace,
+					"originalLimitMilli", a.originalLimits[pod.UID],
+					"containerCount", len(pod.Spec.Containers))
 			}
 		}
 		a.mu.Unlock()

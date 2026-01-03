@@ -155,7 +155,21 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 		deltaThrottled := sample.ThrottledTime - lastSample.ThrottledTime
 		deltaUsage := sample.UsageTime - lastSample.UsageTime
 
-		if deltaUsage > 0 {
+		// P1 Fix: Add minimum usage threshold to avoid numerical instability
+		// If deltaUsage is below threshold, treat sample as invalid and return 0
+		// (the Tracker will retain previous smoothed demand via EMA)
+		const MinUsageUsec = int64(1000) // 1ms minimum usage for valid sample
+
+		if deltaUsage < MinUsageUsec {
+			// Insufficient usage data for stable ratio calculation
+			// Return 0; Tracker's EMA will smooth this appropriately
+			klog.V(4).InfoS("Skipping demand sample: insufficient usage",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"deltaUsage", deltaUsage,
+				"minRequired", MinUsageUsec)
+			demand = 0.0
+		} else if deltaUsage > 0 {
 			// Throttling ratio: how much time was throttled vs used
 			throttlingRatio := float64(deltaThrottled) / float64(deltaUsage)
 
@@ -170,7 +184,6 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 				demand = 0.0
 			}
 
-			// FIXED: Log actual throttling data for debugging
 			klog.V(4).InfoS("Pod throttling metrics",
 				"pod", pod.Name,
 				"namespace", pod.Namespace,
@@ -179,7 +192,7 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 				"throttlingRatio", throttlingRatio,
 				"normalizedDemand", demand)
 		} else {
-			// No usage delta, no demand signal
+			// deltaUsage <= 0: counter reset or no activity
 			demand = 0.0
 		}
 	} else {

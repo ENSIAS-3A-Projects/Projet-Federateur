@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	"mbcas/api/v1alpha1"
@@ -45,6 +46,7 @@ func NewWriter(config *rest.Config) (*Writer, error) {
 }
 
 // WritePodAllocation creates or updates a PodAllocation CRD for a pod.
+// P0 Fix: Uses optimistic locking via resourceVersion and retry on conflict.
 func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desiredCPU string) error {
 	// Use pod UID as the PodAllocation name
 	paName := string(pod.UID)
@@ -87,25 +89,42 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 		return fmt.Errorf("get PodAllocation: %w", err)
 	}
 
-	// Update existing PodAllocation
+	// Check if update is needed
 	spec, found, err := unstructured.NestedMap(pa.UnstructuredContent(), "spec")
 	if err != nil || !found {
 		return fmt.Errorf("get spec: %w", err)
 	}
 
 	currentCPU, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
-	if currentCPU != desiredCPU {
+	if currentCPU == desiredCPU {
+		// No update needed
+		return nil
+	}
+
+	// P0 Fix: Use retry.RetryOnConflict for optimistic locking
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// Re-fetch to get latest resourceVersion
+		pa, err := w.dynamicClient.Resource(w.gvr).Namespace(pod.Namespace).Get(ctx, paName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("re-fetch PodAllocation: %w", err)
+		}
+
+		spec, found, err := unstructured.NestedMap(pa.UnstructuredContent(), "spec")
+		if err != nil || !found {
+			return fmt.Errorf("get spec: %w", err)
+		}
+
+		previousCPU, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
 		unstructured.SetNestedField(spec, desiredCPU, "desiredCPULimit")
 		unstructured.SetNestedField(pa.UnstructuredContent(), spec, "spec")
 
+		// Update preserves resourceVersion from the fetched object
 		_, err = w.dynamicClient.Resource(w.gvr).Namespace(pod.Namespace).Update(ctx, pa, metav1.UpdateOptions{})
 		if err != nil {
-			return fmt.Errorf("update PodAllocation: %w", err)
+			return err // retry.RetryOnConflict will retry if this is a conflict
 		}
 
-		klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace, "cpu", desiredCPU, "previous", currentCPU)
-	}
-
-	return nil
+		klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace, "cpu", desiredCPU, "previous", previousCPU)
+		return nil
+	})
 }
-
