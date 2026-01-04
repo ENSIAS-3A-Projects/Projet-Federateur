@@ -1,0 +1,1955 @@
+﻿{
+    "samples":  [
+                    {
+                        "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    },
+                    {
+                        "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                        "readings":  {
+                                         "default/zookeeper-fdcd9df57-srljr":  {
+                                                                                   "cpuRaw":  "2m",
+                                                                                   "memoryRaw":  "95Mi",
+                                                                                   "cpuMillicores":  2
+                                                                               },
+                                         "default/bus-service-68957f6d6c-m76cj":  {
+                                                                                      "cpuRaw":  "146m",
+                                                                                      "memoryRaw":  "272Mi",
+                                                                                      "cpuMillicores":  146
+                                                                                  },
+                                         "default/user-service-6499d98d5d-7dlnt":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "274Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   },
+                                         "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                                          "cpuRaw":  "4m",
+                                                                                          "memoryRaw":  "65Mi",
+                                                                                          "cpuMillicores":  4
+                                                                                      },
+                                         "default/kafka-59cb848669-hppwp":  {
+                                                                                "cpuRaw":  "149m",
+                                                                                "memoryRaw":  "453Mi",
+                                                                                "cpuMillicores":  149
+                                                                            },
+                                         "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "342Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-bus-f5d8898-ssb9j":  {
+                                                                                    "cpuRaw":  "54m",
+                                                                                    "memoryRaw":  "63Mi",
+                                                                                    "cpuMillicores":  54
+                                                                                },
+                                         "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                                         "cpuRaw":  "21m",
+                                                                                         "memoryRaw":  "284Mi",
+                                                                                         "cpuMillicores":  21
+                                                                                     },
+                                         "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                                          "cpuRaw":  "3m",
+                                                                                          "memoryRaw":  "64Mi",
+                                                                                          "cpuMillicores":  3
+                                                                                      },
+                                         "default/gateway-784474c5d5-n69xh":  {
+                                                                                  "cpuRaw":  "1m",
+                                                                                  "memoryRaw":  "123Mi",
+                                                                                  "cpuMillicores":  1
+                                                                              },
+                                         "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                                                       "cpuRaw":  "2m",
+                                                                                       "memoryRaw":  "62Mi",
+                                                                                       "cpuMillicores":  2
+                                                                                   }
+                                     }
+                    }
+                ],
+    "pods":  {
+                 "default/zookeeper-fdcd9df57-srljr":  {
+                                                           "containers":  [
+                                                                              {
+                                                                                  "cpuRequest":  "100m",
+                                                                                  "name":  "zookeeper",
+                                                                                  "cpuLimit":  "110m"
+                                                                              }
+                                                                          ],
+                                                           "labels":  {
+                                                                          "io.kompose.service":  "zookeeper",
+                                                                          "mbcas.io/managed":  "true",
+                                                                          "pod-template-hash":  "fdcd9df57"
+                                                                      },
+                                                           "namespace":  "default",
+                                                           "uid":  "ad2b3994-db6d-4298-80dd-5ae7a571c73b",
+                                                           "samples":  [
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           },
+                                                                           {
+                                                                               "cpuMillicores":  2,
+                                                                               "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                               "cpuRaw":  "2m"
+                                                                           }
+                                                                       ],
+                                                           "statistics":  {
+                                                                              "cpuMin":  2,
+                                                                              "cpuP50":  2,
+                                                                              "cpuAvg":  2,
+                                                                              "cpuSum":  28,
+                                                                              "cpuP99":  2,
+                                                                              "cpuMax":  2,
+                                                                              "sampleCount":  14,
+                                                                              "cpuP90":  2
+                                                                          },
+                                                           "nodeName":  "mbcas",
+                                                           "name":  "zookeeper-fdcd9df57-srljr"
+                                                       },
+                 "default/bus-service-68957f6d6c-m76cj":  {
+                                                              "containers":  [
+                                                                                 {
+                                                                                     "cpuRequest":  "200m",
+                                                                                     "name":  "bus-service",
+                                                                                     "cpuLimit":  "500m"
+                                                                                 }
+                                                                             ],
+                                                              "labels":  {
+                                                                             "io.kompose.service":  "bus-service",
+                                                                             "mbcas.io/managed":  "true",
+                                                                             "pod-template-hash":  "68957f6d6c"
+                                                                         },
+                                                              "namespace":  "default",
+                                                              "uid":  "af52b51d-e0c9-4828-9e6e-ebd59b6a8b2e",
+                                                              "samples":  [
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              },
+                                                                              {
+                                                                                  "cpuMillicores":  146,
+                                                                                  "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                  "cpuRaw":  "146m"
+                                                                              }
+                                                                          ],
+                                                              "statistics":  {
+                                                                                 "cpuMin":  146,
+                                                                                 "cpuP50":  146,
+                                                                                 "cpuAvg":  146,
+                                                                                 "cpuSum":  2044,
+                                                                                 "cpuP99":  146,
+                                                                                 "cpuMax":  146,
+                                                                                 "sampleCount":  14,
+                                                                                 "cpuP90":  146
+                                                                             },
+                                                              "nodeName":  "mbcas",
+                                                              "name":  "bus-service-68957f6d6c-m76cj"
+                                                          },
+                 "default/user-service-6499d98d5d-7dlnt":  {
+                                                               "containers":  [
+                                                                                  {
+                                                                                      "cpuRequest":  "200m",
+                                                                                      "name":  "user-service",
+                                                                                      "cpuLimit":  "220m"
+                                                                                  }
+                                                                              ],
+                                                               "labels":  {
+                                                                              "io.kompose.service":  "user-service",
+                                                                              "mbcas.io/managed":  "true",
+                                                                              "pod-template-hash":  "6499d98d5d"
+                                                                          },
+                                                               "namespace":  "default",
+                                                               "uid":  "c196c4f2-c74b-4d3e-96df-9b76a0c3149e",
+                                                               "samples":  [
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               }
+                                                                           ],
+                                                               "statistics":  {
+                                                                                  "cpuMin":  2,
+                                                                                  "cpuP50":  2,
+                                                                                  "cpuAvg":  2,
+                                                                                  "cpuSum":  28,
+                                                                                  "cpuP99":  2,
+                                                                                  "cpuMax":  2,
+                                                                                  "sampleCount":  14,
+                                                                                  "cpuP90":  2
+                                                                              },
+                                                               "nodeName":  "mbcas",
+                                                               "name":  "user-service-6499d98d5d-7dlnt"
+                                                           },
+                 "default/postgres-trajet-666995c45b-5npmj":  {
+                                                                  "containers":  [
+                                                                                     {
+                                                                                         "cpuRequest":  "100m",
+                                                                                         "name":  "postgres-trajet",
+                                                                                         "cpuLimit":  "110m"
+                                                                                     }
+                                                                                 ],
+                                                                  "labels":  {
+                                                                                 "io.kompose.service":  "postgres-trajet",
+                                                                                 "mbcas.io/managed":  "true",
+                                                                                 "pod-template-hash":  "666995c45b"
+                                                                             },
+                                                                  "namespace":  "default",
+                                                                  "uid":  "a4a1c476-8074-47fc-a7a7-a72dad91e8c7",
+                                                                  "samples":  [
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  4,
+                                                                                      "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                      "cpuRaw":  "4m"
+                                                                                  }
+                                                                              ],
+                                                                  "statistics":  {
+                                                                                     "cpuMin":  4,
+                                                                                     "cpuP50":  4,
+                                                                                     "cpuAvg":  4,
+                                                                                     "cpuSum":  56,
+                                                                                     "cpuP99":  4,
+                                                                                     "cpuMax":  4,
+                                                                                     "sampleCount":  14,
+                                                                                     "cpuP90":  4
+                                                                                 },
+                                                                  "nodeName":  "mbcas",
+                                                                  "name":  "postgres-trajet-666995c45b-5npmj"
+                                                              },
+                 "default/kafka-59cb848669-hppwp":  {
+                                                        "containers":  [
+                                                                           {
+                                                                               "cpuRequest":  "300m",
+                                                                               "name":  "kafka",
+                                                                               "cpuLimit":  "330m"
+                                                                           }
+                                                                       ],
+                                                        "labels":  {
+                                                                       "io.kompose.service":  "kafka",
+                                                                       "mbcas.io/managed":  "true",
+                                                                       "pod-template-hash":  "59cb848669"
+                                                                   },
+                                                        "namespace":  "default",
+                                                        "uid":  "60c0404e-d591-4ba3-93f9-866f34d104b2",
+                                                        "samples":  [
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        },
+                                                                        {
+                                                                            "cpuMillicores":  149,
+                                                                            "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                            "cpuRaw":  "149m"
+                                                                        }
+                                                                    ],
+                                                        "statistics":  {
+                                                                           "cpuMin":  149,
+                                                                           "cpuP50":  149,
+                                                                           "cpuAvg":  149,
+                                                                           "cpuSum":  2086,
+                                                                           "cpuP99":  149,
+                                                                           "cpuMax":  149,
+                                                                           "sampleCount":  14,
+                                                                           "cpuP90":  149
+                                                                       },
+                                                        "nodeName":  "mbcas",
+                                                        "name":  "kafka-59cb848669-hppwp"
+                                                    },
+                 "default/ticket-service-67588b56b6-ssrtf":  {
+                                                                 "containers":  [
+                                                                                    {
+                                                                                        "cpuRequest":  "200m",
+                                                                                        "name":  "ticket-service",
+                                                                                        "cpuLimit":  "254m"
+                                                                                    }
+                                                                                ],
+                                                                 "labels":  {
+                                                                                "io.kompose.service":  "ticket-service",
+                                                                                "mbcas.io/managed":  "true",
+                                                                                "pod-template-hash":  "67588b56b6"
+                                                                            },
+                                                                 "namespace":  "default",
+                                                                 "uid":  "37a8b0fc-3678-420d-ac0a-f88069ead3b5",
+                                                                 "samples":  [
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 }
+                                                                             ],
+                                                                 "statistics":  {
+                                                                                    "cpuMin":  21,
+                                                                                    "cpuP50":  21,
+                                                                                    "cpuAvg":  21,
+                                                                                    "cpuSum":  294,
+                                                                                    "cpuP99":  21,
+                                                                                    "cpuMax":  21,
+                                                                                    "sampleCount":  14,
+                                                                                    "cpuP90":  21
+                                                                                },
+                                                                 "nodeName":  "mbcas",
+                                                                 "name":  "ticket-service-67588b56b6-ssrtf"
+                                                             },
+                 "default/postgres-bus-f5d8898-ssb9j":  {
+                                                            "containers":  [
+                                                                               {
+                                                                                   "cpuRequest":  "100m",
+                                                                                   "name":  "postgres-bus",
+                                                                                   "cpuLimit":  "110m"
+                                                                               }
+                                                                           ],
+                                                            "labels":  {
+                                                                           "io.kompose.service":  "postgres-bus",
+                                                                           "mbcas.io/managed":  "true",
+                                                                           "pod-template-hash":  "f5d8898"
+                                                                       },
+                                                            "namespace":  "default",
+                                                            "uid":  "e31b96da-b328-425f-bcf3-6676606656a5",
+                                                            "samples":  [
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            },
+                                                                            {
+                                                                                "cpuMillicores":  54,
+                                                                                "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                "cpuRaw":  "54m"
+                                                                            }
+                                                                        ],
+                                                            "statistics":  {
+                                                                               "cpuMin":  54,
+                                                                               "cpuP50":  54,
+                                                                               "cpuAvg":  54,
+                                                                               "cpuSum":  756,
+                                                                               "cpuP99":  54,
+                                                                               "cpuMax":  54,
+                                                                               "sampleCount":  14,
+                                                                               "cpuP90":  54
+                                                                           },
+                                                            "nodeName":  "mbcas",
+                                                            "name":  "postgres-bus-f5d8898-ssb9j"
+                                                        },
+                 "default/trajet-service-58cbc66fd9-6p6xq":  {
+                                                                 "containers":  [
+                                                                                    {
+                                                                                        "cpuRequest":  "200m",
+                                                                                        "name":  "trajet-service",
+                                                                                        "cpuLimit":  "266m"
+                                                                                    }
+                                                                                ],
+                                                                 "labels":  {
+                                                                                "io.kompose.service":  "trajet-service",
+                                                                                "mbcas.io/managed":  "true",
+                                                                                "pod-template-hash":  "58cbc66fd9"
+                                                                            },
+                                                                 "namespace":  "default",
+                                                                 "uid":  "c9be0f88-911f-4c19-bf7a-7900993bcaec",
+                                                                 "samples":  [
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 },
+                                                                                 {
+                                                                                     "cpuMillicores":  21,
+                                                                                     "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                     "cpuRaw":  "21m"
+                                                                                 }
+                                                                             ],
+                                                                 "statistics":  {
+                                                                                    "cpuMin":  21,
+                                                                                    "cpuP50":  21,
+                                                                                    "cpuAvg":  21,
+                                                                                    "cpuSum":  294,
+                                                                                    "cpuP99":  21,
+                                                                                    "cpuMax":  21,
+                                                                                    "sampleCount":  14,
+                                                                                    "cpuP90":  21
+                                                                                },
+                                                                 "nodeName":  "mbcas",
+                                                                 "name":  "trajet-service-58cbc66fd9-6p6xq"
+                                                             },
+                 "default/postgres-ticket-6874ccd6c7-bd6dj":  {
+                                                                  "containers":  [
+                                                                                     {
+                                                                                         "cpuRequest":  "100m",
+                                                                                         "name":  "postgres-ticket",
+                                                                                         "cpuLimit":  "110m"
+                                                                                     }
+                                                                                 ],
+                                                                  "labels":  {
+                                                                                 "io.kompose.service":  "postgres-ticket",
+                                                                                 "mbcas.io/managed":  "true",
+                                                                                 "pod-template-hash":  "6874ccd6c7"
+                                                                             },
+                                                                  "namespace":  "default",
+                                                                  "uid":  "57be7732-6f61-4aaf-9615-95b4d644b75e",
+                                                                  "samples":  [
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  },
+                                                                                  {
+                                                                                      "cpuMillicores":  3,
+                                                                                      "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                      "cpuRaw":  "3m"
+                                                                                  }
+                                                                              ],
+                                                                  "statistics":  {
+                                                                                     "cpuMin":  3,
+                                                                                     "cpuP50":  3,
+                                                                                     "cpuAvg":  3,
+                                                                                     "cpuSum":  42,
+                                                                                     "cpuP99":  3,
+                                                                                     "cpuMax":  3,
+                                                                                     "sampleCount":  14,
+                                                                                     "cpuP90":  3
+                                                                                 },
+                                                                  "nodeName":  "mbcas",
+                                                                  "name":  "postgres-ticket-6874ccd6c7-bd6dj"
+                                                              },
+                 "default/gateway-784474c5d5-n69xh":  {
+                                                          "containers":  [
+                                                                             {
+                                                                                 "cpuRequest":  "200m",
+                                                                                 "name":  "gateway",
+                                                                                 "cpuLimit":  "220m"
+                                                                             }
+                                                                         ],
+                                                          "labels":  {
+                                                                         "io.kompose.service":  "gateway",
+                                                                         "mbcas.io/managed":  "true",
+                                                                         "pod-template-hash":  "784474c5d5"
+                                                                     },
+                                                          "namespace":  "default",
+                                                          "uid":  "1230365a-8070-4ec4-bcc3-a24365e85ccf",
+                                                          "samples":  [
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          },
+                                                                          {
+                                                                              "cpuMillicores":  1,
+                                                                              "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                              "cpuRaw":  "1m"
+                                                                          }
+                                                                      ],
+                                                          "statistics":  {
+                                                                             "cpuMin":  1,
+                                                                             "cpuP50":  1,
+                                                                             "cpuAvg":  1,
+                                                                             "cpuSum":  14,
+                                                                             "cpuP99":  1,
+                                                                             "cpuMax":  1,
+                                                                             "sampleCount":  14,
+                                                                             "cpuP90":  1
+                                                                         },
+                                                          "nodeName":  "mbcas",
+                                                          "name":  "gateway-784474c5d5-n69xh"
+                                                      },
+                 "default/postgres-user-d79d5f5bf-d44cj":  {
+                                                               "containers":  [
+                                                                                  {
+                                                                                      "cpuRequest":  "100m",
+                                                                                      "name":  "postgres-user",
+                                                                                      "cpuLimit":  "110m"
+                                                                                  }
+                                                                              ],
+                                                               "labels":  {
+                                                                              "io.kompose.service":  "postgres-user",
+                                                                              "mbcas.io/managed":  "true",
+                                                                              "pod-template-hash":  "d79d5f5bf"
+                                                                          },
+                                                               "namespace":  "default",
+                                                               "uid":  "ad134f3f-2e8e-4a17-a9b0-b8415e6a953f",
+                                                               "samples":  [
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:48.7580031Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:50.8627847Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:53.0335366Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:55.1809495Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:57.3418327Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:01:59.5043162Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:01.6798997Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:03.8464549Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:06.0188517Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:08.1578777Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:10.3085966Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:12.4471051Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:14.6013941Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               },
+                                                                               {
+                                                                                   "cpuMillicores":  2,
+                                                                                   "timestamp":  "2026-01-04T03:02:16.7526147Z",
+                                                                                   "cpuRaw":  "2m"
+                                                                               }
+                                                                           ],
+                                                               "statistics":  {
+                                                                                  "cpuMin":  2,
+                                                                                  "cpuP50":  2,
+                                                                                  "cpuAvg":  2,
+                                                                                  "cpuSum":  28,
+                                                                                  "cpuP99":  2,
+                                                                                  "cpuMax":  2,
+                                                                                  "sampleCount":  14,
+                                                                                  "cpuP90":  2
+                                                                              },
+                                                               "nodeName":  "mbcas",
+                                                               "name":  "postgres-user-d79d5f5bf-d44cj"
+                                                           }
+             },
+    "metadata":  {
+                     "intervalSeconds":  2,
+                     "startTime":  "2026-01-04T03:01:48.6127772Z",
+                     "samplesCollected":  14,
+                     "namespace":  "default",
+                     "labelSelector":  "",
+                     "durationSeconds":  30,
+                     "endTime":  "2026-01-04T03:02:18.9163057Z"
+                 }
+}

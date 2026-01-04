@@ -30,6 +30,12 @@ type PodSample struct {
 	UsageTime     int64 // microseconds
 }
 
+// DemandResult holds both demand and actual usage metrics.
+type DemandResult struct {
+	Demand           float64 // Normalized demand [0,1] from throttling ratio
+	ActualUsageMilli int64   // Actual CPU usage in millicores
+}
+
 // Reader reads cgroup statistics for pods.
 // ReadPodDemand is safe for concurrent use (protected by mu).
 type Reader struct {
@@ -206,6 +212,80 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 	r.mu.Unlock()
 
 	return demand, nil
+}
+
+// ReadPodMetrics reads both demand signal and actual CPU usage for a pod.
+// Returns DemandResult with normalized demand [0,1] and actual usage in millicores.
+// Thread-safe: protected by internal mutex.
+func (r *Reader) ReadPodMetrics(pod *corev1.Pod, sampleIntervalSeconds float64) (DemandResult, error) {
+	result := DemandResult{}
+
+	cgroupPath, err := r.findPodCgroupPath(pod)
+	if err != nil {
+		klog.V(2).InfoS("Cgroup path not found for pod",
+			"pod", pod.Name,
+			"namespace", pod.Namespace,
+			"uid", pod.UID,
+			"error", err)
+		return result, fmt.Errorf("find cgroup path: %w", err)
+	}
+
+	// Read current CPU statistics
+	sample, err := r.readCPUSample(cgroupPath)
+	if err != nil {
+		return result, fmt.Errorf("read CPU sample: %w", err)
+	}
+
+	key := string(pod.UID)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	lastSample := r.samples[key]
+
+	if lastSample != nil {
+		deltaThrottled := sample.ThrottledTime - lastSample.ThrottledTime
+		deltaUsage := sample.UsageTime - lastSample.UsageTime
+		deltaTime := sample.Timestamp.Sub(lastSample.Timestamp).Seconds()
+
+		// Use actual sample interval if available, otherwise use parameter
+		if deltaTime <= 0 {
+			deltaTime = sampleIntervalSeconds
+		}
+
+		const MinUsageUsec = int64(1000) // 1ms minimum
+
+		if deltaUsage >= MinUsageUsec {
+			// Calculate actual CPU usage in millicores
+			// deltaUsage is in microseconds, convert to millicores
+			// millicores = (usageUsec / 1e6) / deltaTimeSeconds * 1000
+			result.ActualUsageMilli = int64(float64(deltaUsage) / 1e6 / deltaTime * 1000)
+
+			// Calculate throttling ratio for demand signal
+			throttlingRatio := float64(deltaThrottled) / float64(deltaUsage)
+			threshold := 0.1
+			result.Demand = throttlingRatio / threshold
+			if result.Demand > 1.0 {
+				result.Demand = 1.0
+			}
+			if result.Demand < 0.0 {
+				result.Demand = 0.0
+			}
+
+			klog.V(4).InfoS("Pod metrics",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"deltaUsage", deltaUsage,
+				"deltaTime", deltaTime,
+				"actualUsageMilli", result.ActualUsageMilli,
+				"demand", result.Demand)
+		}
+	}
+
+	// Store sample for next calculation
+	r.samples[key] = sample
+
+	return result, nil
 }
 
 // findPodCgroupPath finds the cgroup path for a pod.

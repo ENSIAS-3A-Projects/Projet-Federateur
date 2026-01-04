@@ -107,12 +107,29 @@ func (c *Calculator) ParamsForPod(
 	}
 
 	return allocation.PodParams{
-		Demand:   demand,
-		Bid:      bid,
-		MinMilli: minMilli,
-		MaxMilli: maxMilli,
-		Weight:   weight,
+		Demand:           demand,
+		Bid:              bid,
+		MinMilli:         minMilli,
+		MaxMilli:         maxMilli,
+		Weight:           weight,
+		ActualUsageMilli: 0, // Legacy function, no actual usage
 	}
+}
+
+// ParamsForPodWithUsage extracts market parameters including actual CPU usage.
+// This is the preferred function for utilization-based allocation.
+func (c *Calculator) ParamsForPodWithUsage(
+	pod *corev1.Pod,
+	demand float64,
+	actualUsageMilli int64,
+	baselineMilli int64,
+	nodeCapMilli int64,
+) allocation.PodParams {
+	// Get base params from the existing function
+	params := c.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
+	// Add actual usage
+	params.ActualUsageMilli = actualUsageMilli
+	return params
 }
 
 // filterNormalContainers returns only non-init, non-ephemeral containers.

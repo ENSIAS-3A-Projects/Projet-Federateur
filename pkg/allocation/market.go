@@ -39,11 +39,12 @@ type AllocationResult struct {
 
 // PodParams represents market parameters for a pod.
 type PodParams struct {
-	Demand   float64 // Normalized demand [0,1] from throttling signal
-	Bid      float64 // Effective bid (weight × demand) - kept for compatibility
-	MinMilli int64   // Minimum CPU in millicores (baseline)
-	MaxMilli int64   // Maximum CPU in millicores (ceiling)
-	Weight   float64 // Budget/weight (from request CPU)
+	Demand           float64 // Normalized demand [0,1] from throttling signal
+	Bid              float64 // Effective bid (weight × demand) - kept for compatibility
+	MinMilli         int64   // Minimum CPU in millicores (baseline)
+	MaxMilli         int64   // Maximum CPU in millicores (ceiling)
+	Weight           float64 // Budget/weight (from request CPU)
+	ActualUsageMilli int64   // Actual CPU usage in millicores (from cgroup metrics)
 }
 
 // ClearMarket performs demand-capped allocation.
@@ -125,12 +126,37 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 	}
 }
 
-// computeNeed estimates CPU required to eliminate throttling for a pod.
-// See THEORY.md section "Need Estimation" for the formal definition.
-// Headroom scales with demand: 10% at zero demand, up to 25% at full demand.
-// This ensures pods under stress get extra buffer.
+// computeNeed estimates CPU required based on actual usage.
+// The goal is to set limits close to actual usage for ~100% utilization efficiency.
+// We add a small headroom (5-10%) to prevent throttling during usage spikes.
 func computeNeed(p PodParams) int64 {
-	// Clamp demand to [0,1] defensively
+	// If we have actual usage data, use it directly
+	if p.ActualUsageMilli > 0 {
+		// Add 10% headroom to actual usage to prevent throttling
+		// This targets ~90% utilization of the limit
+		headroomFactor := 0.10
+		need := int64(float64(p.ActualUsageMilli) * (1.0 + headroomFactor))
+
+		// If throttling is detected (demand > 0), add more headroom proportionally
+		if p.Demand > 0 {
+			// Extra headroom based on throttling severity: up to 15% more
+			extraHeadroom := int64(float64(p.ActualUsageMilli) * p.Demand * 0.15)
+			need += extraHeadroom
+		}
+
+		// Clamp to pod bounds
+		if need < p.MinMilli {
+			need = p.MinMilli
+		}
+		if need > p.MaxMilli {
+			need = p.MaxMilli
+		}
+
+		return need
+	}
+
+	// Fallback to demand-based calculation if no actual usage data
+	// This handles pods where cgroup metrics aren't available
 	demand := p.Demand
 	if demand < 0 {
 		demand = 0
@@ -151,9 +177,8 @@ func computeNeed(p PodParams) int64 {
 
 	rawNeed := baseNeed + demandComponent
 
-	// Adaptive headroom: higher demand → more headroom
-	// 10% base + up to 15% additional based on demand
-	headroomFactor := 0.10 + (demand * 0.15)
+	// Minimal headroom for fallback mode
+	headroomFactor := 0.05
 	headroom := int64(float64(rawNeed) * headroomFactor)
 
 	need := rawNeed + headroom

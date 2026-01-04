@@ -67,6 +67,7 @@ type Agent struct {
 
 	// State
 	podDemands     map[types.UID]*demand.Tracker
+	podUsages      map[types.UID]int64  // pod UID -> actual CPU usage in millicores
 	allocations    map[types.UID]string // pod UID -> current allocation
 	originalLimits map[types.UID]int64  // pod UID -> original CPU limit in millicores (preserved across resizes)
 	mu             sync.RWMutex
@@ -115,6 +116,7 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 		ctx:            ctx,
 		cancel:         cancel,
 		podDemands:     make(map[types.UID]*demand.Tracker),
+		podUsages:      make(map[types.UID]int64),
 		allocations:    make(map[types.UID]string),
 		originalLimits: make(map[types.UID]int64),
 		cgroupReader:   cgroupReader,
@@ -212,8 +214,10 @@ func (a *Agent) sample() error {
 		}
 		a.mu.Unlock()
 
-		// Read demand signal from cgroup
-		rawDemand, err := a.cgroupReader.ReadPodDemand(pod)
+		// Read demand signal and actual usage from cgroup
+		metrics, err := a.cgroupReader.ReadPodMetrics(pod, SamplingInterval.Seconds())
+		rawDemand := metrics.Demand
+		actualUsageMilli := metrics.ActualUsageMilli
 
 		// Update demand tracker (applies smoothing)
 		a.mu.Lock()
@@ -234,6 +238,7 @@ func (a *Agent) sample() error {
 					"consecutiveFailures", consecutive,
 					"totalFailures", total)
 				rawDemand = 0.0
+				actualUsageMilli = 0
 			} else {
 				klog.V(2).InfoS("Transient cgroup read failure, retaining previous demand",
 					"pod", pod.Name,
@@ -249,6 +254,9 @@ func (a *Agent) sample() error {
 		}
 
 		smoothedDemand := tracker.Update(rawDemand)
+
+		// Store actual usage for allocation calculation
+		a.podUsages[pod.UID] = actualUsageMilli
 		a.mu.Unlock()
 
 		RecordDemand(pod.Namespace, pod.Name, rawDemand, smoothedDemand)
@@ -263,6 +271,7 @@ func (a *Agent) sample() error {
 	for uid := range a.podDemands {
 		if !seen[uid] {
 			delete(a.podDemands, uid)
+			delete(a.podUsages, uid)
 			delete(a.allocations, uid)
 			delete(a.originalLimits, uid)
 			klog.V(4).InfoS("Removed pod from tracking", "podUID", uid)
@@ -521,7 +530,11 @@ func (a *Agent) computeAllocations(
 			continue
 		}
 
-		params := a.demandCalc.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
+		// Get actual usage for this pod (0 if not available)
+		actualUsageMilli := a.podUsages[uid]
+
+		// Use the new function that includes actual usage
+		params := a.demandCalc.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
 
 		// Override MaxMilli with original limit if we have it stored
 		// This prevents feedback loop where applied limits become new max
