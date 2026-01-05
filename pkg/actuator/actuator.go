@@ -186,6 +186,167 @@ func ApplyScaling(
 	return before, after, nil
 }
 
+// ApplyScalingWithResources applies in-place scaling with separate request and limit values.
+// This is the preferred method when requests and limits need to be different values.
+func ApplyScalingWithResources(
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace, podName, containerName string,
+	cpuRequest, cpuLimit string,
+	memRequest, memLimit string,
+	opts Options,
+) (before *corev1.Pod, after *corev1.Pod, err error) {
+	if podName == "" {
+		return nil, nil, fmt.Errorf("pod name is required")
+	}
+	if cpuRequest == "" && cpuLimit == "" && memRequest == "" && memLimit == "" {
+		return nil, nil, fmt.Errorf("no resource changes requested")
+	}
+
+	// Validate and normalize resource quantities
+	normalizedCPURequest, err := parseQuantityOrEmpty(cpuRequest)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid CPU request quantity: %w", err)
+	}
+	normalizedCPULimit, err := parseQuantityOrEmpty(cpuLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid CPU limit quantity: %w", err)
+	}
+	normalizedMemRequest, err := parseQuantityOrEmpty(memRequest)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid memory request quantity: %w", err)
+	}
+	normalizedMemLimit, err := parseQuantityOrEmpty(memLimit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid memory limit quantity: %w", err)
+	}
+
+	// Fetch pod to validate existence and determine default container
+	before, err = client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetch pod: %w", err)
+	}
+
+	targetContainer, err := resolveContainer(before, containerName)
+	if err != nil {
+		return before, nil, err
+	}
+
+	if opts.DryRun {
+		return before, nil, nil
+	}
+
+	maxRetries := opts.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		patchData, buildErr := buildResizePatchWithResources(
+			targetContainer,
+			normalizedCPURequest, normalizedCPULimit,
+			normalizedMemRequest, normalizedMemLimit,
+		)
+		if buildErr != nil {
+			return before, nil, buildErr
+		}
+
+		_, lastErr = client.CoreV1().Pods(namespace).Patch(
+			ctx,
+			podName,
+			types.StrategicMergePatchType,
+			patchData,
+			metav1.PatchOptions{},
+			"resize",
+		)
+		if lastErr == nil {
+			break
+		}
+
+		var statusErr *apierrors.StatusError
+		if errors.As(lastErr, &statusErr) {
+			reason := statusErr.Status().Reason
+			if reason == metav1.StatusReasonConflict {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			enhancedErr := classifyAndEnhanceError(lastErr, statusErr, attempt+1, maxRetries)
+			return before, nil, enhancedErr
+		}
+
+		return before, nil, fmt.Errorf("apply resize patch: %w", lastErr)
+	}
+
+	if lastErr != nil {
+		var statusErr *apierrors.StatusError
+		if errors.As(lastErr, &statusErr) {
+			return before, nil, classifyAndEnhanceError(lastErr, statusErr, maxRetries, maxRetries)
+		}
+		return before, nil, fmt.Errorf("apply resize patch: %w", lastErr)
+	}
+
+	// If wait is enabled, poll until resize completes or timeout
+	if opts.Wait {
+		after, err = waitForResizeCompletion(ctx, client, namespace, podName, opts.WaitTimeout, opts.PollInterval)
+		if err != nil {
+			return before, nil, fmt.Errorf("wait for resize completion: %w", err)
+		}
+		return before, after, nil
+	}
+
+	// Without wait, just fetch the pod once to show current state
+	after, err = client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return before, nil, fmt.Errorf("verify updated pod: %w", err)
+	}
+
+	return before, after, nil
+}
+
+// buildResizePatchWithResources constructs a patch with separate request and limit values.
+func buildResizePatchWithResources(containerName, cpuRequest, cpuLimit, memRequest, memLimit string) ([]byte, error) {
+	if cpuRequest == "" && cpuLimit == "" && memRequest == "" && memLimit == "" {
+		return nil, fmt.Errorf("no resource changes requested")
+	}
+
+	patchObj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []map[string]interface{}{
+				{
+					"name": containerName,
+					"resources": map[string]interface{}{
+						"requests": map[string]interface{}{},
+						"limits":   map[string]interface{}{},
+					},
+				},
+			},
+		},
+	}
+
+	spec := patchObj["spec"].(map[string]interface{})
+	containers := spec["containers"].([]map[string]interface{})
+	resources := containers[0]["resources"].(map[string]interface{})
+	requests := resources["requests"].(map[string]interface{})
+	limits := resources["limits"].(map[string]interface{})
+
+	if cpuRequest != "" {
+		requests["cpu"] = cpuRequest
+	}
+	if cpuLimit != "" {
+		limits["cpu"] = cpuLimit
+	}
+	if memRequest != "" {
+		requests["memory"] = memRequest
+	}
+	if memLimit != "" {
+		limits["memory"] = memLimit
+	}
+
+	return json.Marshal(patchObj)
+}
+
 // buildResizePatch constructs the JSON patch body for the resize subresource.
 func buildResizePatch(containerName, newCPU, newMem string, policy ResizePolicy) ([]byte, error) {
 	if newCPU == "" && newMem == "" {
@@ -196,7 +357,7 @@ func buildResizePatch(containerName, newCPU, newMem string, policy ResizePolicy)
 		"spec": map[string]interface{}{
 			"containers": []map[string]interface{}{
 				{
-					"name": containerName,
+					"name":      containerName,
 					"resources": map[string]interface{}{},
 				},
 			},

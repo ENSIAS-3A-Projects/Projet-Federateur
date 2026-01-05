@@ -30,11 +30,12 @@ const (
 
 // AllocationResult contains allocations and metadata.
 type AllocationResult struct {
-	Allocations map[types.UID]int64
-	Mode        AllocationMode
-	TotalNeed   int64
-	TotalAlloc  int64
-	Needs       map[types.UID]int64
+	Allocations        map[types.UID]int64 // CPU limit allocations in millicores
+	RequestAllocations map[types.UID]int64 // CPU request allocations in millicores
+	Mode               AllocationMode
+	TotalNeed          int64
+	TotalAlloc         int64
+	Needs              map[types.UID]int64
 }
 
 // PodParams represents market parameters for a pod.
@@ -65,9 +66,10 @@ func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams) map[types.UI
 func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) AllocationResult {
 	if len(pods) == 0 {
 		return AllocationResult{
-			Allocations: make(map[types.UID]int64),
-			Mode:        ModeUncongested,
-			Needs:       make(map[types.UID]int64),
+			Allocations:        make(map[types.UID]int64),
+			RequestAllocations: make(map[types.UID]int64),
+			Mode:               ModeUncongested,
+			Needs:              make(map[types.UID]int64),
 		}
 	}
 
@@ -83,47 +85,90 @@ func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) 
 		totalMin += p.MinMilli
 	}
 
+	var allocs map[types.UID]int64
+	var mode AllocationMode
+	var totalAlloc int64
+
 	// Step 2: Check overloaded condition (baselines exceed capacity)
 	if totalMin > capacityMilli {
-		allocs := scaleBaselines(pods, capacityMilli)
-		totalAlloc := int64(0)
+		allocs = scaleBaselines(pods, capacityMilli)
+		mode = ModeOverloaded
 		for _, a := range allocs {
 			totalAlloc += a
 		}
-		return AllocationResult{
-			Allocations: allocs,
-			Mode:        ModeOverloaded,
-			TotalNeed:   totalNeed,
-			TotalAlloc:  totalAlloc,
-			Needs:       needs,
-		}
-	}
-
-	// Step 3: Check congested condition (needs exceed capacity)
-	if totalNeed > capacityMilli {
-		allocs := nashReduce(needs, pods, capacityMilli)
-		totalAlloc := int64(0)
+	} else if totalNeed > capacityMilli {
+		// Step 3: Check congested condition (needs exceed capacity)
+		allocs = nashReduce(needs, pods, capacityMilli)
+		mode = ModeCongested
 		for _, a := range allocs {
 			totalAlloc += a
 		}
-		return AllocationResult{
-			Allocations: allocs,
-			Mode:        ModeCongested,
-			TotalNeed:   totalNeed,
-			TotalAlloc:  totalAlloc,
-			Needs:       needs,
-		}
+	} else {
+		// Step 4: Uncongested - give everyone what they need
+		allocs = clampToBounds(needs, pods)
+		mode = ModeUncongested
+		totalAlloc = totalNeed
 	}
 
-	// Step 4: Uncongested - give everyone what they need
-	allocs := clampToBounds(needs, pods)
+	// Step 5: Compute request allocations based on limit allocations
+	// Requests should be slightly below limits to allow burst headroom
+	// Formula: request = limit * 0.9 (90% of limit), but clamped to actual usage
+	requestAllocs := computeRequestAllocations(allocs, pods)
+
 	return AllocationResult{
-		Allocations: allocs,
-		Mode:        ModeUncongested,
-		TotalNeed:   totalNeed,
-		TotalAlloc:  totalNeed, // In uncongested mode, alloc = need
-		Needs:       needs,
+		Allocations:        allocs,
+		RequestAllocations: requestAllocs,
+		Mode:               mode,
+		TotalNeed:          totalNeed,
+		TotalAlloc:         totalAlloc,
+		Needs:              needs,
 	}
+}
+
+// computeRequestAllocations calculates optimal CPU requests based on limit allocations.
+// Strategy:
+//   - Request = max(actualUsage * 1.05, limit * 0.85)
+//   - This ensures request is above usage (for scheduling) but below limit (for burst)
+//   - Minimum request is 10m to avoid scheduling issues
+func computeRequestAllocations(limits map[types.UID]int64, pods map[types.UID]PodParams) map[types.UID]int64 {
+	requests := make(map[types.UID]int64)
+
+	for uid, limit := range limits {
+		p := pods[uid]
+
+		var request int64
+
+		if p.ActualUsageMilli > 0 {
+			// Usage-based request: actual usage + 5% headroom
+			usageBasedRequest := int64(float64(p.ActualUsageMilli) * 1.05)
+
+			// Limit-based request: 85% of limit (ensures room for bursting)
+			limitBasedRequest := int64(float64(limit) * 0.85)
+
+			// Use the higher of the two to ensure scheduling works
+			request = usageBasedRequest
+			if limitBasedRequest > request {
+				request = limitBasedRequest
+			}
+		} else {
+			// No usage data: use 90% of limit
+			request = int64(float64(limit) * 0.90)
+		}
+
+		// Minimum request of 10m to avoid scheduling edge cases
+		if request < 10 {
+			request = 10
+		}
+
+		// Request cannot exceed limit (K8s constraint)
+		if request > limit {
+			request = limit
+		}
+
+		requests[uid] = request
+	}
+
+	return requests
 }
 
 // computeNeed estimates CPU required based on actual usage.

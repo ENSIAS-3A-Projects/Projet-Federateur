@@ -21,11 +21,17 @@ spec:
     - jsonPath: .spec.podName
       name: Pod
       type: string
+    - jsonPath: .spec.desiredCPURequest
+      name: Desired Request
+      type: string
     - jsonPath: .spec.desiredCPULimit
-      name: Desired CPU
+      name: Desired Limit
+      type: string
+    - jsonPath: .status.appliedCPURequest
+      name: Applied Request
       type: string
     - jsonPath: .status.appliedCPULimit
-      name: Applied CPU
+      name: Applied Limit
       type: string
     - jsonPath: .status.phase
       name: Status
@@ -69,6 +75,13 @@ spec:
                 description: |-
                   DesiredCPULimit is the desired CPU limit for the pod.
                   This is a Kubernetes resource quantity string (e.g., "500m", "1", "2.5").
+                  Limit should be set slightly above request for burst headroom.
+                type: string
+              desiredCPURequest:
+                description: |-
+                  DesiredCPURequest is the desired CPU request for the pod.
+                  This is a Kubernetes resource quantity string (e.g., "100m", "500m").
+                  Request should be set slightly above actual usage for scheduling efficiency.
                 type: string
               namespace:
                 description: Namespace is the namespace of the target pod.
@@ -78,6 +91,7 @@ spec:
                 type: string
             required:
             - desiredCPULimit
+            - desiredCPURequest
             - namespace
             - podName
             type: object
@@ -89,20 +103,29 @@ spec:
                   AppliedCPULimit is the CPU limit that was last successfully applied to the pod.
                   This may differ from desiredCPULimit if the application is in progress or failed.
                 type: string
+              appliedCPURequest:
+                description: AppliedCPURequest is the CPU request that was last successfully
+                  applied to the pod.
+                type: string
               lastAppliedTime:
-                description: LastAppliedTime is the timestamp when the CPU limit was
-                  last successfully applied.
+                description: LastAppliedTime is the timestamp when the CPU resources
+                  were last successfully applied.
                 format: date-time
                 type: string
               lastAttemptTime:
                 description: LastAttemptTime is the timestamp of the last attempt
-                  to apply the CPU limit.
+                  to apply the CPU resources.
                 format: date-time
                 type: string
               phase:
                 description: |-
                   Phase represents the current phase of the allocation.
                   Possible values: Pending, Applied, Failed
+
+                  Phase invariants (for correctness and evaluation):
+                    - Applied: appliedCPULimit == desiredCPULimit AND appliedCPURequest == desiredCPURequest
+                    - Pending: reconcile in progress (controller is working to apply desired state)
+                    - Failed: controller must retry later (temporary failure, will be retried)
                 enum:
                 - Pending
                 - Applied

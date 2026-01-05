@@ -47,7 +47,7 @@ func NewWriter(config *rest.Config) (*Writer, error) {
 
 // WritePodAllocation creates or updates a PodAllocation CRD for a pod.
 // P0 Fix: Uses optimistic locking via resourceVersion and retry on conflict.
-func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desiredCPU string) error {
+func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desiredRequest, desiredLimit string) error {
 	// Use pod UID as the PodAllocation name
 	paName := string(pod.UID)
 
@@ -66,9 +66,10 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 				Namespace: pod.Namespace,
 			},
 			Spec: v1alpha1.PodAllocationSpec{
-				Namespace:       pod.Namespace,
-				PodName:         pod.Name,
-				DesiredCPULimit: desiredCPU,
+				Namespace:         pod.Namespace,
+				PodName:           pod.Name,
+				DesiredCPURequest: desiredRequest,
+				DesiredCPULimit:   desiredLimit,
 			},
 		}
 
@@ -83,7 +84,7 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 			return fmt.Errorf("create PodAllocation: %w", err)
 		}
 
-		klog.V(4).InfoS("Created PodAllocation", "name", paName, "namespace", pod.Namespace, "cpu", desiredCPU)
+		klog.V(4).InfoS("Created PodAllocation", "name", paName, "namespace", pod.Namespace, "request", desiredRequest, "limit", desiredLimit)
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("get PodAllocation: %w", err)
@@ -95,8 +96,9 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 		return fmt.Errorf("get spec: %w", err)
 	}
 
-	currentCPU, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
-	if currentCPU == desiredCPU {
+	currentRequest, _, _ := unstructured.NestedString(spec, "desiredCPURequest")
+	currentLimit, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
+	if currentRequest == desiredRequest && currentLimit == desiredLimit {
 		// No update needed
 		return nil
 	}
@@ -114,8 +116,10 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 			return fmt.Errorf("get spec: %w", err)
 		}
 
-		previousCPU, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
-		unstructured.SetNestedField(spec, desiredCPU, "desiredCPULimit")
+		previousRequest, _, _ := unstructured.NestedString(spec, "desiredCPURequest")
+		previousLimit, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
+		unstructured.SetNestedField(spec, desiredRequest, "desiredCPURequest")
+		unstructured.SetNestedField(spec, desiredLimit, "desiredCPULimit")
 		unstructured.SetNestedField(pa.UnstructuredContent(), spec, "spec")
 
 		// Update preserves resourceVersion from the fetched object
@@ -124,7 +128,9 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 			return err // retry.RetryOnConflict will retry if this is a conflict
 		}
 
-		klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace, "cpu", desiredCPU, "previous", previousCPU)
+		klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace,
+			"request", desiredRequest, "previousRequest", previousRequest,
+			"limit", desiredLimit, "previousLimit", previousLimit)
 		return nil
 	})
 }

@@ -79,13 +79,24 @@ func (h *HealthServer) GetStatus() HealthStatus {
 	h.agent.mu.RUnlock()
 
 	healthy := true
+	uptime := time.Since(h.agent.startTime)
 
-	if time.Since(h.lastSampleTime) > 10*time.Second && h.sampleCount > 0 {
-		healthy = false
-	}
+	// During startup grace period (first 60 seconds), only check cgroup status
+	// This prevents probe failures during initial API discovery which can be slow
+	if uptime < 60*time.Second {
+		if h.cgroupStatus != "ok" {
+			healthy = false
+		}
+	} else {
+		// After grace period, require samples within last 30 seconds
+		// (increased from 10s to handle slow API calls and high pod counts)
+		if time.Since(h.lastSampleTime) > 30*time.Second && h.sampleCount > 0 {
+			healthy = false
+		}
 
-	if h.cgroupStatus != "ok" {
-		healthy = false
+		if h.cgroupStatus != "ok" {
+			healthy = false
+		}
 	}
 
 	return HealthStatus{

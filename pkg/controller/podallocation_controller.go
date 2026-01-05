@@ -126,6 +126,7 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		now := metav1.Now()
 		pa.Status.Phase = PhaseApplied
 		pa.Status.Reason = "Excluded"
+		pa.Status.AppliedCPURequest = pa.Spec.DesiredCPURequest
 		pa.Status.AppliedCPULimit = pa.Spec.DesiredCPULimit
 		if pa.Status.LastAppliedTime == nil {
 			pa.Status.LastAppliedTime = &now
@@ -133,7 +134,7 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if err := r.Status().Update(ctx, pa); err != nil {
 			return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 		}
-		r.Recorder.Event(pa, corev1.EventTypeNormal, "CPULimitSkipped",
+		r.Recorder.Event(pa, corev1.EventTypeNormal, "CPUSkipped",
 			fmt.Sprintf("Skipping Pod %s/%s: excluded via label", pa.Spec.Namespace, pa.Spec.PodName))
 		return ctrl.Result{}, nil
 	}
@@ -143,6 +144,7 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		now := metav1.Now()
 		pa.Status.Phase = PhaseApplied
 		pa.Status.Reason = "GuaranteedQoS"
+		pa.Status.AppliedCPURequest = pa.Spec.DesiredCPURequest
 		pa.Status.AppliedCPULimit = pa.Spec.DesiredCPULimit
 		if pa.Status.LastAppliedTime == nil {
 			pa.Status.LastAppliedTime = &now
@@ -150,7 +152,7 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if err := r.Status().Update(ctx, pa); err != nil {
 			return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 		}
-		r.Recorder.Event(pa, corev1.EventTypeNormal, "CPULimitSkipped",
+		r.Recorder.Event(pa, corev1.EventTypeNormal, "CPUSkipped",
 			fmt.Sprintf("Skipping Pod %s/%s: Guaranteed QoS (requests == limits)", pa.Spec.Namespace, pa.Spec.PodName))
 		return ctrl.Result{}, nil
 	}
@@ -162,12 +164,27 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			fmt.Sprintf("Cannot extract CPU limit from pod: %v", err), nil)
 	}
 
-	// Normalize desired CPU
+	// Extract current CPU request from pod
+	currentRequest, err := extractCPURequest(pod)
+	if err != nil {
+		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidPodState",
+			fmt.Sprintf("Cannot extract CPU request from pod: %v", err), nil)
+	}
+
+	// Normalize desired CPU limit
 	desiredCPU := pa.Spec.DesiredCPULimit
 	desiredQty, err := resource.ParseQuantity(desiredCPU)
 	if err != nil {
 		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidDesiredCPU",
-			fmt.Sprintf("Invalid desired CPU quantity %q: %v", desiredCPU, err), nil)
+			fmt.Sprintf("Invalid desired CPU limit %q: %v", desiredCPU, err), nil)
+	}
+
+	// Normalize desired CPU request
+	desiredRequest := pa.Spec.DesiredCPURequest
+	desiredRequestQty, err := resource.ParseQuantity(desiredRequest)
+	if err != nil {
+		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidDesiredCPU",
+			fmt.Sprintf("Invalid desired CPU request %q: %v", desiredRequest, err), nil)
 	}
 
 	// Parse current CPU for comparison
@@ -177,13 +194,23 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			fmt.Sprintf("Cannot parse current CPU limit %q: %v", currentCPU, err), nil)
 	}
 
+	// Parse current request for comparison
+	currentRequestQty, err := resource.ParseQuantity(currentRequest)
+	if err != nil {
+		return r.updateStatus(ctx, pa, PhaseFailed, "InvalidPodState",
+			fmt.Sprintf("Cannot parse current CPU request %q: %v", currentRequest, err), nil)
+	}
+
 	// Compare desired vs actual (using quantity comparison, not string)
-	if currentQty.Equal(desiredQty) {
+	limitMatch := currentQty.Equal(desiredQty)
+	requestMatch := currentRequestQty.Equal(desiredRequestQty)
+	if limitMatch && requestMatch {
 		// Already applied - update status if needed
-		if pa.Status.Phase != PhaseApplied || pa.Status.AppliedCPULimit != desiredCPU {
+		if pa.Status.Phase != PhaseApplied || pa.Status.AppliedCPULimit != desiredCPU || pa.Status.AppliedCPURequest != desiredRequest {
 			now := metav1.Now()
 			pa.Status.Phase = PhaseApplied
 			pa.Status.Reason = "AlreadyApplied"
+			pa.Status.AppliedCPURequest = desiredRequest
 			pa.Status.AppliedCPULimit = desiredCPU
 			if pa.Status.LastAppliedTime == nil {
 				pa.Status.LastAppliedTime = &now
@@ -191,8 +218,8 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			if err := r.Status().Update(ctx, pa); err != nil {
 				return ctrl.Result{}, fmt.Errorf("update status: %w", err)
 			}
-			r.Recorder.Event(pa, corev1.EventTypeNormal, "CPULimitApplied",
-				fmt.Sprintf("CPU limit %s already applied to Pod %s/%s", desiredCPU, pa.Spec.Namespace, pa.Spec.PodName))
+			r.Recorder.Event(pa, corev1.EventTypeNormal, "CPUApplied",
+				fmt.Sprintf("CPU request=%s limit=%s already applied to Pod %s/%s", desiredRequest, desiredCPU, pa.Spec.Namespace, pa.Spec.PodName))
 		}
 		return ctrl.Result{}, nil
 	}
@@ -218,7 +245,7 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// P0 Fix: Apply to ALL containers proportionally, not just first
-	// For simplicity, we apply the same limit to each container
+	// For simplicity, we apply the same values to each container
 	// (future: distribute proportionally based on original limits)
 	containerName := ""
 	if len(pod.Spec.Containers) > 0 {
@@ -226,45 +253,63 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	opts := actuator.Options{
-		Policy:      actuator.PolicyLimits, // Only mutate limits
 		MaxRetries:  3,
 		Wait:        true,             // P1 Fix: Wait for resize to complete
 		WaitTimeout: 10 * time.Second, // Don't wait too long
 	}
 
-	before, after, err := actuator.ApplyScaling(
+	// Use the new function that handles separate request and limit values
+	before, after, err := actuator.ApplyScalingWithResources(
 		ctx,
 		r.K8sClient,
 		pa.Spec.Namespace,
 		pa.Spec.PodName,
 		containerName,
-		desiredCPU,
-		"", // No memory change
+		desiredRequest, // CPU request
+		desiredCPU,     // CPU limit
+		"",             // No memory request change
+		"",             // No memory limit change
 		opts,
 	)
 	if err != nil {
 		return r.updateStatus(ctx, pa, PhaseFailed, "ActuatorError",
-			fmt.Sprintf("Failed to apply CPU limit: %v", err), nil)
+			fmt.Sprintf("Failed to apply CPU resources: %v", err), nil)
 	}
 
 	// P1 Fix: Verify the resize was actually applied by kubelet
 	verified := false
 	verifyReason := "Unknown"
 	if after != nil && len(after.Spec.Containers) > 0 {
-		// Check if the limit matches what we requested
-		actualLimit, ok := after.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]
-		if ok {
-			actualMilli := actualLimit.MilliValue()
-			desiredQty, _ := resource.ParseQuantity(desiredCPU)
-			desiredMilli := desiredQty.MilliValue()
-			if actualMilli == desiredMilli {
+		// Check if both request and limit match what we requested
+		actualLimit, limitOk := after.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]
+		actualRequest, requestOk := after.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]
+
+		if limitOk && requestOk {
+			actualLimitMilli := actualLimit.MilliValue()
+			actualRequestMilli := actualRequest.MilliValue()
+			desiredLimitQty, _ := resource.ParseQuantity(desiredCPU)
+			desiredRequestQty, _ := resource.ParseQuantity(desiredRequest)
+			desiredLimitMilli := desiredLimitQty.MilliValue()
+			desiredRequestMilli := desiredRequestQty.MilliValue()
+
+			limitMatch := actualLimitMilli == desiredLimitMilli
+			requestMatch := actualRequestMilli == desiredRequestMilli
+
+			if limitMatch && requestMatch {
 				verified = true
 				verifyReason = "Verified"
+			} else if !limitMatch && !requestMatch {
+				verifyReason = fmt.Sprintf("Mismatch: actualLimit=%dm(want %dm), actualRequest=%dm(want %dm)",
+					actualLimitMilli, desiredLimitMilli, actualRequestMilli, desiredRequestMilli)
+			} else if !limitMatch {
+				verifyReason = fmt.Sprintf("LimitMismatch: actual=%dm, desired=%dm", actualLimitMilli, desiredLimitMilli)
 			} else {
-				verifyReason = fmt.Sprintf("Mismatch: actual=%dm, desired=%dm", actualMilli, desiredMilli)
+				verifyReason = fmt.Sprintf("RequestMismatch: actual=%dm, desired=%dm", actualRequestMilli, desiredRequestMilli)
 			}
-		} else {
+		} else if !limitOk {
 			verifyReason = "NoLimitSet"
+		} else {
+			verifyReason = "NoRequestSet"
 		}
 	} else {
 		verifyReason = "NoAfterPod"
@@ -283,10 +328,12 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, fmt.Errorf("update status after verify: %w", err)
 		}
 		r.Recorder.Event(pa, corev1.EventTypeWarning, "ResizeNotVerified",
-			fmt.Sprintf("Resize to %s not verified for Pod %s/%s: %s", desiredCPU, pa.Spec.Namespace, pa.Spec.PodName, verifyReason))
+			fmt.Sprintf("Resize to request=%s limit=%s not verified for Pod %s/%s: %s",
+				desiredRequest, desiredCPU, pa.Spec.Namespace, pa.Spec.PodName, verifyReason))
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
+	pa.Status.AppliedCPURequest = desiredRequest
 	pa.Status.AppliedCPULimit = desiredCPU
 	pa.Status.LastAppliedTime = &now
 	if err := r.Status().Update(ctx, pa); err != nil {
@@ -294,8 +341,10 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Emit event on state transition
-	r.Recorder.Event(pa, corev1.EventTypeNormal, "CPULimitApplied",
-		fmt.Sprintf("Applied CPU limit %s to Pod %s/%s (was %s)", desiredCPU, pa.Spec.Namespace, pa.Spec.PodName, extractCPULimitString(before)))
+	r.Recorder.Event(pa, corev1.EventTypeNormal, "CPUApplied",
+		fmt.Sprintf("Applied CPU request=%s limit=%s to Pod %s/%s (was request=%s limit=%s)",
+			desiredRequest, desiredCPU, pa.Spec.Namespace, pa.Spec.PodName,
+			extractCPURequestString(before), extractCPULimitString(before)))
 
 	return ctrl.Result{}, nil
 }
@@ -493,6 +542,34 @@ func extractCPULimitString(pod *corev1.Pod) string {
 	container := pod.Spec.Containers[0]
 	if cpuLimit, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
 		return cpuLimit.String()
+	}
+	return "none"
+}
+
+// extractCPURequest extracts the CPU request from the first container of a pod.
+// If no request is set, returns DefaultCPULimit (same as limit for safety).
+func extractCPURequest(pod *corev1.Pod) (string, error) {
+	if len(pod.Spec.Containers) == 0 {
+		return "", fmt.Errorf("pod has no containers")
+	}
+
+	container := pod.Spec.Containers[0]
+	if cpuRequest, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+		return cpuRequest.String(), nil
+	}
+
+	// No request set - return default
+	return DefaultCPULimit, nil
+}
+
+// extractCPURequestString is a helper to extract CPU request as string, returning "none" if not set.
+func extractCPURequestString(pod *corev1.Pod) string {
+	if pod == nil || len(pod.Spec.Containers) == 0 {
+		return "none"
+	}
+	container := pod.Spec.Containers[0]
+	if cpuRequest, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+		return cpuRequest.String()
 	}
 	return "none"
 }

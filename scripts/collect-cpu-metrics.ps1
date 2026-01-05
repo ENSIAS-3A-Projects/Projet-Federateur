@@ -4,7 +4,7 @@
 # Outputs results to a JSON file
 
 param(
-    [int]$DurationSeconds = 30,
+    [int]$DurationSeconds = 600,
     [int]$IntervalSeconds = 2,
     [string]$Namespace = "default",
     [string]$LabelSelector = "",  # e.g., "app=consumer" or "mbcas.io/managed=true"

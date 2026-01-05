@@ -347,7 +347,7 @@ func (a *Agent) writeAllocations() error {
 	}
 
 	// Compute allocations using market-clearing (Phase 4)
-	result, allocations, podParams := a.computeAllocations(demands, availableCPU, podMap, nodeCapacity)
+	result, limitAllocations, requestAllocations, podParams := a.computeAllocations(demands, availableCPU, podMap, nodeCapacity)
 
 	// Mode transition logging
 	if result.Mode != a.previousMode {
@@ -382,68 +382,75 @@ func (a *Agent) writeAllocations() error {
 	RecordSystemMetrics(a.nodeName, modeInt, nashProductLog, result.TotalNeed, result.TotalAlloc, availableMilli)
 
 	// Log decisions and record metrics before writing
-	for uid, cpuAllocation := range allocations {
+	for uid, cpuLimit := range limitAllocations {
 		pod := podMap[uid]
 		params := podParams[uid]
 		need := result.Needs[uid]
+		cpuRequest := requestAllocations[uid]
 		if pod != nil {
 			RecordAllocation(pod.Namespace, pod.Name, result.Allocations[uid], need)
 			klog.InfoS("Allocation decision",
 				"pod", pod.Name,
 				"namespace", pod.Namespace,
 				"demand", fmt.Sprintf("%.3f", params.Demand),
+				"actualUsage", params.ActualUsageMilli,
 				"weight", params.Weight,
 				"min", params.MinMilli,
 				"max", params.MaxMilli,
 				"need", need,
-				"allocation", cpuAllocation,
+				"request", cpuRequest,
+				"limit", cpuLimit,
 				"mode", result.Mode)
 		}
 	}
 
 	// Write allocations
-	for uid, cpuAllocation := range allocations {
+	for uid, cpuLimit := range limitAllocations {
 		pod, exists := podMap[uid]
 		if !exists {
 			klog.V(4).InfoS("Pod not found, skipping allocation", "podUID", uid)
 			continue
 		}
 
+		cpuRequest := requestAllocations[uid]
+
 		// Grace period protection: do not decrease allocations during startup
 		if a.isInGracePeriod() {
 			currentLimit, err := extractCurrentCPULimit(pod)
 			if err == nil {
 				currentMilli := parseCPUToMilli(currentLimit)
-				desiredMilli := parseCPUToMilli(cpuAllocation)
+				desiredMilli := parseCPUToMilli(cpuLimit)
 				if desiredMilli < currentMilli {
 					klog.InfoS("Grace period: preventing allocation decrease",
 						"pod", pod.Name,
 						"namespace", pod.Namespace,
 						"current", currentLimit,
-						"desired", cpuAllocation)
+						"desired", cpuLimit)
 					continue
 				}
 			}
 		}
 
-		// Check if change is significant
+		// Check if change is significant (compare both request and limit)
 		a.mu.RLock()
 		currentAlloc := a.allocations[uid]
 		a.mu.RUnlock()
 
-		if shouldWrite(currentAlloc, cpuAllocation) {
-			if err := a.writer.WritePodAllocation(a.ctx, pod, cpuAllocation); err != nil {
+		// Combine request and limit for comparison (format: "request:limit")
+		newAlloc := cpuRequest + ":" + cpuLimit
+		if shouldWrite(currentAlloc, newAlloc) {
+			if err := a.writer.WritePodAllocation(a.ctx, pod, cpuRequest, cpuLimit); err != nil {
 				klog.ErrorS(err, "Failed to write PodAllocation", "pod", pod.Name, "namespace", pod.Namespace)
 				continue
 			}
 
 			// Update tracked allocation
 			a.mu.Lock()
-			a.allocations[uid] = cpuAllocation
+			a.allocations[uid] = newAlloc
 			a.mu.Unlock()
 
 			klog.InfoS("Updated PodAllocation", "pod", pod.Name, "namespace", pod.Namespace,
-				"cpu", cpuAllocation, "previous", currentAlloc)
+				"request", cpuRequest, "limit", cpuLimit, "previous", currentAlloc)
 		}
 	}
 
@@ -512,7 +519,7 @@ func (a *Agent) computeAllocations(
 	availableCPU float64,
 	podMap map[types.UID]*corev1.Pod,
 	nodeCapacity float64,
-) (allocation.AllocationResult, map[types.UID]string, map[types.UID]allocation.PodParams) {
+) (allocation.AllocationResult, map[types.UID]string, map[types.UID]string, map[types.UID]allocation.PodParams) {
 	// Parse baseline once (not in hot loop)
 	baselineQty, _ := resource.ParseQuantity(BaselineCPUPerPod)
 	baselineMilli := baselineQty.MilliValue()
@@ -559,13 +566,19 @@ func (a *Agent) computeAllocations(
 	// Clear market using Phase 4 solver
 	result := allocation.ClearMarketWithMetadata(availableMilli, podParams)
 
-	// Convert to string format ("${m}m")
-	allocations := make(map[types.UID]string)
+	// Convert limits to string format ("${m}m")
+	limitAllocations := make(map[types.UID]string)
 	for uid, milli := range result.Allocations {
-		allocations[uid] = fmt.Sprintf("%dm", milli)
+		limitAllocations[uid] = fmt.Sprintf("%dm", milli)
 	}
 
-	return result, allocations, podParams
+	// Convert requests to string format ("${m}m")
+	requestAllocations := make(map[types.UID]string)
+	for uid, milli := range result.RequestAllocations {
+		requestAllocations[uid] = fmt.Sprintf("%dm", milli)
+	}
+
+	return result, limitAllocations, requestAllocations, podParams
 }
 
 // extractNodeCPUCapacity extracts CPU capacity from node status.

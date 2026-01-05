@@ -17,8 +17,10 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.spec.namespace`
 // +kubebuilder:printcolumn:name="Pod",type=string,JSONPath=`.spec.podName`
-// +kubebuilder:printcolumn:name="Desired CPU",type=string,JSONPath=`.spec.desiredCPULimit`
-// +kubebuilder:printcolumn:name="Applied CPU",type=string,JSONPath=`.status.appliedCPULimit`
+// +kubebuilder:printcolumn:name="Desired Request",type=string,JSONPath=`.spec.desiredCPURequest`
+// +kubebuilder:printcolumn:name="Desired Limit",type=string,JSONPath=`.spec.desiredCPULimit`
+// +kubebuilder:printcolumn:name="Applied Request",type=string,JSONPath=`.status.appliedCPURequest`
+// +kubebuilder:printcolumn:name="Applied Limit",type=string,JSONPath=`.status.appliedCPULimit`
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +genclient
@@ -41,14 +43,24 @@ type PodAllocationSpec struct {
 	// +kubebuilder:validation:Required
 	PodName string `json:"podName"`
 
+	// DesiredCPURequest is the desired CPU request for the pod.
+	// This is a Kubernetes resource quantity string (e.g., "100m", "500m").
+	// Request should be set slightly above actual usage for scheduling efficiency.
+	// +kubebuilder:validation:Required
+	DesiredCPURequest string `json:"desiredCPURequest"`
+
 	// DesiredCPULimit is the desired CPU limit for the pod.
 	// This is a Kubernetes resource quantity string (e.g., "500m", "1", "2.5").
+	// Limit should be set slightly above request for burst headroom.
 	// +kubebuilder:validation:Required
 	DesiredCPULimit string `json:"desiredCPULimit"`
 }
 
 // PodAllocationStatus defines the observed state of PodAllocation.
 type PodAllocationStatus struct {
+	// AppliedCPURequest is the CPU request that was last successfully applied to the pod.
+	AppliedCPURequest string `json:"appliedCPURequest,omitempty"`
+
 	// AppliedCPULimit is the CPU limit that was last successfully applied to the pod.
 	// This may differ from desiredCPULimit if the application is in progress or failed.
 	AppliedCPULimit string `json:"appliedCPULimit,omitempty"`
@@ -57,7 +69,7 @@ type PodAllocationStatus struct {
 	// Possible values: Pending, Applied, Failed
 	//
 	// Phase invariants (for correctness and evaluation):
-	//   - Applied: appliedCPULimit == desiredCPULimit (allocation successfully applied)
+	//   - Applied: appliedCPULimit == desiredCPULimit AND appliedCPURequest == desiredCPURequest
 	//   - Pending: reconcile in progress (controller is working to apply desired state)
 	//   - Failed: controller must retry later (temporary failure, will be retried)
 	//
@@ -67,10 +79,10 @@ type PodAllocationStatus struct {
 	// Reason provides a human-readable reason for the current phase.
 	Reason string `json:"reason,omitempty"`
 
-	// LastAppliedTime is the timestamp when the CPU limit was last successfully applied.
+	// LastAppliedTime is the timestamp when the CPU resources were last successfully applied.
 	LastAppliedTime *metav1.Time `json:"lastAppliedTime,omitempty"`
 
-	// LastAttemptTime is the timestamp of the last attempt to apply the CPU limit.
+	// LastAttemptTime is the timestamp of the last attempt to apply the CPU resources.
 	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
 }
 
