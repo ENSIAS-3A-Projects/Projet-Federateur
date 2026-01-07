@@ -1,0 +1,62 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106190600
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell
+Process ID: 32092
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  COMPETITOR TEST: Native Kubernetes (CFS)
+  Test ID: native-test_2026-01-06_19-06-00
+================================================================================
+
+==> Setting up namespace 'demo-native'...
+
+
+==> Deploying 8 Native workloads...
+[INFO] Config: Requests=100m, Limits=2000m (Equal Shares)
+[PASS] Deployments created
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring CPU Usage (via Metrics Server)...
+[INFO] Since Limits are static, we verify fairness by measuring ACTUAL USAGE.
+[INFO] Sampling every 15s for 3 minutes...
+  [Warn] Metrics not ready yet...
+  [T+15s] Total Usage: 2111m | Avg: 264m | Active Pods: 8
+  [T+30s] Total Usage: 2111m | Avg: 264m | Active Pods: 8
+  [T+45s] Total Usage: 2111m | Avg: 264m | Active Pods: 8
+  [T+60s] Total Usage: 1905m | Avg: 238m | Active Pods: 8
+  [T+75s] Total Usage: 1905m | Avg: 238m | Active Pods: 8
+  [T+90s] Total Usage: 1905m | Avg: 238m | Active Pods: 8
+  [T+105s] Total Usage: 1905m | Avg: 238m | Active Pods: 8
+  [T+120s] Total Usage: 1907m | Avg: 238m | Active Pods: 8
+  [T+135s] Total Usage: 1907m | Avg: 238m | Active Pods: 8
+  [T+150s] Total Usage: 1907m | Avg: 238m | Active Pods: 8
+  [T+165s] Total Usage: 1919m | Avg: 240m | Active Pods: 8
+  [T+180s] Total Usage: 1919m | Avg: 240m | Active Pods: 8
+
+==> Calculating Metrics...
+
+---------------------------------------------------
+  NATIVE K8s RESULTS
+---------------------------------------------------
+  Jain's Fairness Index: 0.9764
+  Total Usage:           1919m
+  CSV Data:              .\test-results\native-test_2026-01-06_19-06-00_metrics.csv
+**********************
+Windows PowerShell transcript end
+End time: 20260106191013
+**********************

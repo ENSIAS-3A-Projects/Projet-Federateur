@@ -1,0 +1,296 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106214128
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 9936
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_21-41-28
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   64000m
+Saturation Level: 3.2x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 8 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 1951m | Fairness: 0.6935
+  [T+15s] Avg Alloc: 1463m | Fairness: 0.5201
+  [T+30s] Avg Alloc: 1904m | Fairness: 0.6741
+  [T+45s] Avg Alloc: 1890m | Fairness: 0.6691
+  [T+60s] Avg Alloc: 1864m | Fairness: 0.6554
+PS>TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+>> TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+>> TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout
+kubectl : Unable to connect to the server: net/http: TLS handshake timeout
+At C:\Users\achra\Desktop\Game Theory\scripts\test-contention.ps1:116 char:15
++ ...   $paJson = kubectl get podallocations -n $Namespace -o json 2>$null  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Unable to conne...ndshake timeout:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+PS C:\Users\achra\Desktop\Game Theory> kubectl top pods
+
+PS C:\Users\achra\Desktop\Game Theory> kubectl top pods -n demo-forced
+
+PS C:\Users\achra\Desktop\Game Theory> # 4 pods x 3 workers = 12 threads (vs 4 real cores).
+PS C:\Users\achra\Desktop\Game Theory> # This is ~300% load. Enough to prove stability, safe enough to finish.
+PS C:\Users\achra\Desktop\Game Theory> .\scripts\test-contention.ps1 -PodCount 4 -StressWorkers 3
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_21-48-00
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   32000m
+Saturation Level: 1.6x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 4 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 1662m | Fairness: 0.6434
+  [T+15s] Avg Alloc: 1438m | Fairness: 0.5675
+  [T+30s] Avg Alloc: 1366m | Fairness: 0.5391
+PS C:\Users\achra\Desktop\Game Theory> TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+>> TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+>> TerminatingError(kubectl.exe): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout"
+The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: Unable to connect to the server: net/http: TLS handshake timeout
+kubectl : Unable to connect to the server: net/http: TLS handshake timeout
+At C:\Users\achra\Desktop\Game Theory\scripts\test-contention.ps1:116 char:15
++ ...   $paJson = kubectl get podallocations -n $Namespace -o json 2>$null  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Unable to conne...ndshake timeout:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+PS C:\Users\achra\Desktop\Game Theory> minikube delete -all
+
+PS C:\Users\achra\Desktop\Game Theory> minikube delete --all
+
+PS C:\Users\achra\Desktop\Game Theory> .\scripts\build.ps1
+================================================================================
+  MBCAS Build & Load to Minikube
+================================================================================
+
+Configuration:
+  Project Root:       C:\Users\achra\Desktop\Game Theory
+  Cluster Name:       mbcas
+  Tag:                latest
+
+
+==> Checking prerequisites...
+[OK] Minikube: v1.37.0
+[OK] Docker: 28.4.0
+
+==> Setting up Minikube cluster 'mbcas'...
+Creating new Minikube cluster with InPlacePodVerticalScaling...
+Command: minikube start -p mbcas --cpus=4 --memory=4096 --driver=docker --feature-gates=InPlacePodVerticalScaling=true --extra-config=kubelet.feature-gates=InPlacePodVerticalScaling=true --addons=metrics-server
+
+[OK] Cluster created
+
+
+
+==> Building Docker images locally...
+Building mbcas-agent:latest...
+
+[OK] Built mbcas-agent:latest
+Building mbcas-controller:latest...
+
+[OK] Built mbcas-controller:latest
+
+==> Loading images into Minikube...
+Loading mbcas-agent:latest...
+
+[OK] Loaded mbcas-agent:latest
+Loading mbcas-controller:latest...
+
+[OK] Loaded mbcas-controller:latest
+
+==> Verifying images in Minikube...
+Images available in Minikube:
+  docker.io/library/mbcas-controller:latest
+  docker.io/library/mbcas-agent:latest
+
+================================================================================
+  Build Complete!
+================================================================================
+
+Images built and loaded into Minikube cluster 'mbcas':
+  - mbcas-agent:latest
+  - mbcas-controller:latest
+
+Next steps:
+  1. Deploy MBCAS:
+     .\scripts\deploy.ps1
+
+  2. Or deploy manually:
+     kubectl apply -f config/namespace.yaml
+     kubectl apply -f config/crd/bases/
+     kubectl apply -f config/agent/
+     kubectl apply -f config/controller/
+PS C:\Users\achra\Desktop\Game Theory> .\scripts\deploy.ps1
+================================================================================
+  MBCAS Deploy
+================================================================================
+Using manifests from: C:\Users\achra\Desktop\Game Theory\k8s
+
+==> Creating namespace...
+
+[OK] Namespace created
+
+==> Applying CRD...
+
+[OK] CRD applied
+
+==> Creating service account...
+
+[OK] Service account created
+
+==> Applying RBAC (roles and bindings)...
+
+
+
+[OK] RBAC applied
+
+==> Deploying Agent DaemonSet...
+
+[OK] Agent DaemonSet deployed
+
+==> Deploying Controller...
+
+[OK] Controller deployed
+
+==> Applying LimitRange policy (optional)...
+
+[OK] LimitRange policy applied
+
+==> Waiting for components to be ready...
+Waiting for Agent DaemonSet...
+
+Waiting for Controller Deployment...
+
+
+==> Verifying deployment...
+
+
+================================================================================
+  MBCAS Deployed Successfully!
+================================================================================
+
+Useful commands:
+  kubectl get pods -n mbcas-system
+  kubectl logs -n mbcas-system -l app.kubernetes.io/component=agent -f
+  kubectl logs -n mbcas-system -l app.kubernetes.io/component=controller -f
+  kubectl get podallocations -A
+
+PS C:\Users\achra\Desktop\Game Theory> .\scripts\test-contention.ps1 -PodCount 4 -StressWorkers 3
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_21-52-55
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   32000m
+Saturation Level: 1.6x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 4 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+pod/worker-3 condition met
+pod/worker-4 condition met
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 1062m | Fairness: 0.7317
+  [T+15s] Avg Alloc: 1441m | Fairness: 0.6446
+  [T+30s] Avg Alloc: 1412m | Fairness: 0.6309
+  [T+45s] Avg Alloc: 1244m | Fairness: 0.6404
+  [T+60s] Avg Alloc: 1200m | Fairness: 0.6931
+  [T+75s] Avg Alloc: 1200m | Fairness: 0.6931
+  [T+90s] Avg Alloc: 1079m | Fairness: 0.7099
+  [T+105s] Avg Alloc: 1090m | Fairness: 0.7099
+  [T+120s] Avg Alloc: 1031m | Fairness: 0.7219
+  [T+135s] Avg Alloc: 1130m | Fairness: 0.6823
+  [T+150s] Avg Alloc: 1218m | Fairness: 0.7449
+  [T+165s] Avg Alloc: 1148m | Fairness: 0.7342
+  [T+180s] Avg Alloc: 1082m | Fairness: 0.7421
+
+==> Generating Report...
+
+---------------------------------------------------
+  MBCAS (FORCED) RESULTS
+---------------------------------------------------
+  Contention Ratio:      1.6x
+  Jain's Fairness Index: 0.7421
+  Total Allocated:       4330m / 20000m
+Transcript stopped, output file is C:\Users\achra\Desktop\Game Theory\test-results\mbcas-forced_2026-01-06_21-52-55_log.txt
+PS C:\Users\achra\Desktop\Game Theory> .\scripts\test-contention.ps1 -PodCount 4 -WorkersPerPod 3
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_22-02-20
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   12000m
+WARNING: Contention Ratio is only 0.6x. This might not force throttling.
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 4 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 2029m | Fairness: 0.7558
+  [T+15s] Avg Alloc: 2030m | Fairness: 0.7559
+  [T+30s] Avg Alloc: 2027m | Fairness: 0.7548
+  [T+45s] Avg Alloc: 2030m | Fairness: 0.7559
+  [T+60s] Avg Alloc: 2031m | Fairness: 0.7564
+  [T+75s] Avg Alloc: 2031m | Fairness: 0.7566
+  [T+90s] Avg Alloc: 2031m | Fairness: 0.7566
+  [T+105s] Avg Alloc: 2028m | Fairness: 0.755
+  [T+120s] Avg Alloc: 2028m | Fairness: 0.7553
+  [T+135s] Avg Alloc: 2029m | Fairness: 0.7555
+  [T+150s] Avg Alloc: 2028m | Fairness: 0.7551
+  [T+165s] Avg Alloc: 2028m | Fairness: 0.7551
+  [T+180s] Avg Alloc: 2029m | Fairness: 0.7557
+
+==> Generating Report...
+
+---------------------------------------------------
+  MBCAS (FORCED) RESULTS
+---------------------------------------------------
+  Contention Ratio:      0.6x
+  Jain's Fairness Index: 0.7557
+  Total Allocated:       16233m / 20000m
+Transcript stopped, output file is C:\Users\achra\Desktop\Game Theory\test-results\mbcas-forced_2026-01-06_22-02-20_log.txt

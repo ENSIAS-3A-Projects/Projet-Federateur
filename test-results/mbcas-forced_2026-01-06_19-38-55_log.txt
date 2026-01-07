@@ -1,0 +1,62 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106193855
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell
+Process ID: 32092
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_19-38-55
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   64000m
+Saturation Level: 3.2x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 8 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 0m | Fairness: 0
+  [T+15s] Avg Alloc: 0m | Fairness: 0
+  [T+30s] Avg Alloc: 0m | Fairness: 0
+  [T+45s] Avg Alloc: 0m | Fairness: 0
+  [T+60s] Avg Alloc: 0m | Fairness: 0
+  [T+75s] Avg Alloc: 0m | Fairness: 0
+  [T+90s] Avg Alloc: 0m | Fairness: 0
+  [T+105s] Avg Alloc: 0m | Fairness: 0
+  [T+120s] Avg Alloc: 0m | Fairness: 0
+  [T+135s] Avg Alloc: 0m | Fairness: 0
+  [T+150s] Avg Alloc: 0m | Fairness: 0
+  [T+165s] Avg Alloc: 0m | Fairness: 0
+  [T+180s] Avg Alloc: 0m | Fairness: 0
+
+==> Generating Report...
+
+---------------------------------------------------
+  MBCAS (FORCED) RESULTS
+---------------------------------------------------
+  Contention Ratio:      3.2x
+  Jain's Fairness Index: 0
+  Total Allocated:       0m / 20000m
+**********************
+Windows PowerShell transcript end
+End time: 20260106194254
+**********************

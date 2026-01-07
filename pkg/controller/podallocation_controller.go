@@ -38,7 +38,7 @@ const (
 	// MaxAbsoluteDeltaMilli is the maximum absolute CPU change per resize (in millicores).
 	// This prevents extreme jumps even when factor is within limits.
 	// P0 Fix: Added to prevent bypassing step size via zero values.
-	MaxAbsoluteDeltaMilli = 2000 // 2 cores max change per resize
+	MaxAbsoluteDeltaMilli = 20000 // 20 cores max change per resize
 
 	// MinSafeBaselineMilli is the minimum baseline for step size calculations.
 	// Used when current is 0 or very low to prevent unbounded increases.

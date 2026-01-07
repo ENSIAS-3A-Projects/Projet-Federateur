@@ -1,0 +1,87 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106181616
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell
+Process ID: 32092
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  MBCAS Latency Impact Test
+  Test ID: latency-test_2026-01-06_18-16-16
+================================================================================
+
+==> Setting up namespace 'demo'...
+
+
+==> Deploying Victim App (CPU-bound HTTP Server)...
+
+[PASS] Victim API deployed
+
+==> Deploying 7 Aggressor Pods (Stress-ng)...
+  - Creating aggressor-1
+  - Creating aggressor-2
+  - Creating aggressor-3
+  - Creating aggressor-4
+  - Creating aggressor-5
+  - Creating aggressor-6
+  - Creating aggressor-7
+
+==> Waiting for all pods to be READY...
+[INFO] Waiting for victim-api...
+
+[PASS] Victim API is ready
+[INFO] Waiting for aggressors to schedule...
+[INFO] Victim IP: 10.244.0.23
+
+==> Starting Load Test Generator...
+[INFO] Running 'hey' for 60 seconds against http://
+
+  - Waiting for load test to complete (60 s)...
+
+
+
+==> Collecting Latency Metrics...
+
+----- LOAD TEST RESULTS -----
+
+Summary:
+  Total:	60.0030 secs
+  Slowest:	0.0000 secs
+  Fastest:	0.0000 secs
+  Average:	 NaN secs
+  Requests/sec:	129494.1297
+
+
+Response time histogram:
+
+
+Latency distribution:
+
+Details (average, fastest, slowest):
+  DNS+dialup:	 NaN secs, 0.0000 secs, 0.0000 secs
+  DNS-lookup:	 NaN secs, 0.0000 secs, 0.0000 secs
+  req write:	 NaN secs, 0.0000 secs, 0.0000 secs
+  resp wait:	 NaN secs, 0.0000 secs, 0.0000 secs
+  resp read:	 NaN secs, 0.0000 secs, 0.0000 secs
+
+Status code distribution:
+
+Error distribution:
+  [7770030]	Get http:: http: no Host in request URL
+
+-----------------------------
+**********************
+Windows PowerShell transcript end
+End time: 20260106181807
+**********************

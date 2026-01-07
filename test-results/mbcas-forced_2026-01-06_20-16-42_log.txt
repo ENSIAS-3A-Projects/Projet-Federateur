@@ -1,0 +1,62 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106201642
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: powershell
+Process ID: 32092
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_20-16-42
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   64000m
+Saturation Level: 3.2x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 8 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 746m | Fairness: 0.4004
+  [T+15s] Avg Alloc: 640m | Fairness: 0.3432
+  [T+30s] Avg Alloc: 542m | Fairness: 0.3505
+  [T+45s] Avg Alloc: 542m | Fairness: 0.3505
+  [T+60s] Avg Alloc: 502m | Fairness: 0.3541
+  [T+75s] Avg Alloc: 498m | Fairness: 0.3511
+  [T+90s] Avg Alloc: 480m | Fairness: 0.3538
+  [T+105s] Avg Alloc: 502m | Fairness: 0.3639
+  [T+120s] Avg Alloc: 533m | Fairness: 0.3582
+  [T+135s] Avg Alloc: 625m | Fairness: 0.3403
+  [T+150s] Avg Alloc: 562m | Fairness: 0.3418
+  [T+165s] Avg Alloc: 562m | Fairness: 0.3418
+  [T+180s] Avg Alloc: 502m | Fairness: 0.3426
+
+==> Generating Report...
+
+---------------------------------------------------
+  MBCAS (FORCED) RESULTS
+---------------------------------------------------
+  Contention Ratio:      3.2x
+  Jain's Fairness Index: 0.3426
+  Total Allocated:       4020m / 20000m
+**********************
+Windows PowerShell transcript end
+End time: 20260106202110
+**********************

@@ -174,20 +174,27 @@ func computeRequestAllocations(limits map[types.UID]int64, pods map[types.UID]Po
 // computeNeed estimates CPU required based on actual usage.
 // The goal is to set limits close to actual usage for ~100% utilization efficiency.
 // We add a small headroom (5-10%) to prevent throttling during usage spikes.
+// computeNeed estimates CPU required based on actual usage.
 func computeNeed(p PodParams) int64 {
 	// If we have actual usage data, use it directly
 	if p.ActualUsageMilli > 0 {
-		// Add 10% headroom to actual usage to prevent throttling
-		// This targets ~90% utilization of the limit
+		// Base headroom (10%)
 		headroomFactor := 0.10
-		need := int64(float64(p.ActualUsageMilli) * (1.0 + headroomFactor))
-
-		// If throttling is detected (demand > 0), add more headroom proportionally
+		
+		// AGGRESSIVE SCALING FIX:
+		// If throttling is detected, we must scale aggressively to escape the "low limit trap".
+		// Instead of just 15%, we allow up to 400% (4x) growth if demand is high.
+		demandFactor := 0.0
 		if p.Demand > 0 {
-			// Extra headroom based on throttling severity: up to 15% more
-			extraHeadroom := int64(float64(p.ActualUsageMilli) * p.Demand * 0.15)
-			need += extraHeadroom
+			// p.Demand is [0,1].
+			// If Demand is 0.5 (50% throttled), factor adds ~2.0x extra.
+			// Formula: Allow rapid doubling/tripling when heavily throttled.
+			demandFactor = p.Demand * 4.0 
 		}
+
+		// Calculate need
+		// Example: Usage=100, Demand=0.5 -> Need = 100 * (1.0 + 0.1 + 2.0) = 310m
+		need := int64(float64(p.ActualUsageMilli) * (1.0 + headroomFactor + demandFactor))
 
 		// Clamp to pod bounds
 		if need < p.MinMilli {
@@ -201,40 +208,23 @@ func computeNeed(p PodParams) int64 {
 	}
 
 	// Fallback to demand-based calculation if no actual usage data
-	// This handles pods where cgroup metrics aren't available
+	// (Keep existing fallback logic...)
 	demand := p.Demand
-	if demand < 0 {
-		demand = 0
-	}
-	if demand > 1 {
-		demand = 1
-	}
-
-	// Base need starts at minimum (baseline)
+	if demand < 0 { demand = 0 }
+	if demand > 1 { demand = 1 }
+	
 	baseNeed := p.MinMilli
-
-	// Demand-driven component: interpolate between min and max
 	demandRange := p.MaxMilli - p.MinMilli
-	if demandRange < 0 {
-		demandRange = 0
-	}
+	if demandRange < 0 { demandRange = 0 }
+	
 	demandComponent := int64(float64(demandRange) * demand)
-
 	rawNeed := baseNeed + demandComponent
-
-	// Minimal headroom for fallback mode
-	headroomFactor := 0.05
-	headroom := int64(float64(rawNeed) * headroomFactor)
-
+	
+	headroom := int64(float64(rawNeed) * 0.05)
 	need := rawNeed + headroom
 
-	// Clamp to pod bounds
-	if need < p.MinMilli {
-		need = p.MinMilli
-	}
-	if need > p.MaxMilli {
-		need = p.MaxMilli
-	}
+	if need < p.MinMilli { need = p.MinMilli }
+	if need > p.MaxMilli { need = p.MaxMilli }
 
 	return need
 }

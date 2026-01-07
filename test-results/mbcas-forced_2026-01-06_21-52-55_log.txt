@@ -1,0 +1,63 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260106215255
+Username: DESKTOP-7F84R7K\achra
+RunAs User: DESKTOP-7F84R7K\achra
+Configuration Name: 
+Machine: DESKTOP-7F84R7K (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 9936
+PSVersion: 5.1.26100.7462
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.7462
+BuildVersion: 10.0.26100.7462
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+================================================================================
+  MBCAS FORCED CONTENTION TEST (High Saturation)
+  Test ID: mbcas-forced_2026-01-06_21-52-55
+================================================================================
+[INFO] Node Capacity: 20000m
+[INFO] Test Demand:   32000m
+Saturation Level: 1.6x (Severe Contention)
+
+==> Setting up namespace 'demo-forced'...
+
+==> Deploying 4 MBCAS-managed pods...
+[PASS] Pods deployed
+
+==> Waiting for pods to be ready...
+pod/worker-3 condition met
+pod/worker-4 condition met
+
+==> Monitoring Allocations (3 minutes)...
+[INFO] Capturing PodAllocations every 15s...
+  [T+0s] Avg Alloc: 1062m | Fairness: 0.7317
+  [T+15s] Avg Alloc: 1441m | Fairness: 0.6446
+  [T+30s] Avg Alloc: 1412m | Fairness: 0.6309
+  [T+45s] Avg Alloc: 1244m | Fairness: 0.6404
+  [T+60s] Avg Alloc: 1200m | Fairness: 0.6931
+  [T+75s] Avg Alloc: 1200m | Fairness: 0.6931
+  [T+90s] Avg Alloc: 1079m | Fairness: 0.7099
+  [T+105s] Avg Alloc: 1090m | Fairness: 0.7099
+  [T+120s] Avg Alloc: 1031m | Fairness: 0.7219
+  [T+135s] Avg Alloc: 1130m | Fairness: 0.6823
+  [T+150s] Avg Alloc: 1218m | Fairness: 0.7449
+  [T+165s] Avg Alloc: 1148m | Fairness: 0.7342
+  [T+180s] Avg Alloc: 1082m | Fairness: 0.7421
+
+==> Generating Report...
+
+---------------------------------------------------
+  MBCAS (FORCED) RESULTS
+---------------------------------------------------
+  Contention Ratio:      1.6x
+  Jain's Fairness Index: 0.7421
+  Total Allocated:       4330m / 20000m
+**********************
+Windows PowerShell transcript end
+End time: 20260106215813
+**********************
