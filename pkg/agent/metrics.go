@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -44,12 +46,32 @@ var (
 		[]string{"namespace", "pod"},
 	)
 
-	// Utility metric
+	// Utility metric (legacy - allocation/need ratio)
 	metricUtility = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "mbcas",
 			Name:      "utility",
 			Help:      "Pod utility (satisfaction ratio) [0,1]",
+		},
+		[]string{"namespace", "pod"},
+	)
+
+	// Game-theoretic utility metric
+	metricGameUtility = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "game_utility",
+			Help:      "Game-theoretic utility value (from UtilityParams)",
+		},
+		[]string{"namespace", "pod"},
+	)
+
+	// SLO score metric
+	metricSLOScore = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "slo_score",
+			Help:      "SLO satisfaction score [0,1] from sigmoid function",
 		},
 		[]string{"namespace", "pod"},
 	)
@@ -95,6 +117,112 @@ var (
 			Help:      "Available CPU capacity in millicores",
 		},
 	)
+
+	// Coalition and Shapley metrics (Phase 2)
+	metricCoalitionCount = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "coalition_count",
+			Help:      "Number of active coalitions",
+		},
+	)
+
+	metricCoalitionSize = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "coalition_size",
+			Help:      "Number of members in each coalition",
+		},
+		[]string{"coalition_id"},
+	)
+
+	metricShapleyCredit = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "shapley_credit",
+			Help:      "Accumulated Shapley credit per pod",
+		},
+		[]string{"namespace", "pod"},
+	)
+
+	metricCoreStable = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "core_stable",
+			Help:      "1 if allocation is in epsilon-core, 0 otherwise",
+		},
+	)
+
+	// Lyapunov stability metrics (Phase 3)
+	metricLyapunovPotential = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "lyapunov_potential",
+			Help:      "Current Lyapunov potential function value",
+		},
+	)
+
+	metricLyapunovStepSize = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "lyapunov_step_size",
+			Help:      "Current Lyapunov controller step size",
+		},
+	)
+
+	metricLyapunovConverging = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "lyapunov_converging",
+			Help:      "1 if Lyapunov potential is decreasing (converging), 0 otherwise",
+		},
+	)
+
+	// Shadow price metrics (Phase 3)
+	metricShadowPriceCPU = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "shadow_price_cpu",
+			Help:      "Current CPU shadow price (Lagrange multiplier)",
+		},
+	)
+
+	// Timing metrics for performance monitoring
+	metricAllocationComputeDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "mbcas",
+			Name:      "allocation_compute_duration_seconds",
+			Help:      "Time taken to compute allocations in seconds",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 10), // 1ms to ~1s
+		},
+	)
+
+	metricNashSolverIterations = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "mbcas",
+			Name:      "nash_solver_iterations",
+			Help:      "Number of redistribution iterations in Nash solver",
+		},
+	)
+
+	metricPodDiscoveryDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "mbcas",
+			Name:      "pod_discovery_duration_seconds",
+			Help:      "Time taken to discover pods in seconds",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 10), // 0.1ms to ~100ms
+		},
+	)
+
+	metricCgroupReadDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "mbcas",
+			Name:      "cgroup_read_duration_seconds",
+			Help:      "Time taken to read cgroup metrics in seconds",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 10), // 0.1ms to ~100ms
+		},
+		[]string{"namespace", "pod"},
+	)
 )
 
 // RecordDemand records demand metrics for a pod.
@@ -133,4 +261,73 @@ func ClearPodMetrics(namespace, pod string) {
 	metricAllocationMilli.DeleteLabelValues(namespace, pod)
 	metricNeedMilli.DeleteLabelValues(namespace, pod)
 	metricUtility.DeleteLabelValues(namespace, pod)
+	metricShapleyCredit.DeleteLabelValues(namespace, pod)
+}
+
+// RecordCoalitionMetrics records coalition-related metrics.
+func RecordCoalitionMetrics(coalitionCount int, coalitionSizes map[string]int) {
+	metricCoalitionCount.Set(float64(coalitionCount))
+	for id, size := range coalitionSizes {
+		metricCoalitionSize.WithLabelValues(id).Set(float64(size))
+	}
+}
+
+// RecordShapleyCredit records the Shapley credit for a pod.
+func RecordShapleyCredit(namespace, pod string, credit float64) {
+	metricShapleyCredit.WithLabelValues(namespace, pod).Set(credit)
+}
+
+// RecordCoreStability records whether the allocation is in the epsilon-core.
+func RecordCoreStability(stable bool) {
+	if stable {
+		metricCoreStable.Set(1)
+	} else {
+		metricCoreStable.Set(0)
+	}
+}
+
+// RecordLyapunovMetrics records Lyapunov stability controller metrics.
+func RecordLyapunovMetrics(potential, stepSize float64, converging bool) {
+	metricLyapunovPotential.Set(potential)
+	metricLyapunovStepSize.Set(stepSize)
+	if converging {
+		metricLyapunovConverging.Set(1)
+	} else {
+		metricLyapunovConverging.Set(0)
+	}
+}
+
+// RecordUtility records the game-theoretic utility value for a pod.
+func RecordUtility(namespace, pod string, utility float64) {
+	metricGameUtility.WithLabelValues(namespace, pod).Set(utility)
+}
+
+// RecordSLOScore records the SLO satisfaction score for a pod.
+func RecordSLOScore(namespace, pod string, sloScore float64) {
+	metricSLOScore.WithLabelValues(namespace, pod).Set(sloScore)
+}
+
+// RecordShadowPrice records the current CPU shadow price.
+func RecordShadowPrice(cpuPrice float64) {
+	metricShadowPriceCPU.Set(cpuPrice)
+}
+
+// RecordAllocationComputeDuration records the time taken to compute allocations.
+func RecordAllocationComputeDuration(duration time.Duration) {
+	metricAllocationComputeDuration.Observe(duration.Seconds())
+}
+
+// RecordNashSolverIterations records the number of redistribution iterations.
+func RecordNashSolverIterations(iterations int) {
+	metricNashSolverIterations.Set(float64(iterations))
+}
+
+// RecordPodDiscoveryDuration records the time taken to discover pods.
+func RecordPodDiscoveryDuration(duration time.Duration) {
+	metricPodDiscoveryDuration.Observe(duration.Seconds())
+}
+
+// RecordCgroupReadDuration records the time taken to read cgroup metrics for a pod.
+func RecordCgroupReadDuration(namespace, pod string, duration time.Duration) {
+	metricCgroupReadDuration.WithLabelValues(namespace, pod).Observe(duration.Seconds())
 }

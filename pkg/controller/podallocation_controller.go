@@ -6,6 +6,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 
 const (
 	// ResizeCooldown is the minimum time between resize operations per pod.
-	ResizeCooldown = 10 * time.Second
+	ResizeCooldown = 5 * time.Second
 
 	// MaxStepSizeFactor is the maximum factor by which CPU can change per resize.
 	// Set high (10x) for demo to allow large decreases for idle pods.
@@ -244,36 +245,163 @@ func (r *PodAllocationReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, fmt.Errorf("update status before apply: %w", err)
 	}
 
-	// P0 Fix: Apply to ALL containers proportionally, not just first
-	// For simplicity, we apply the same values to each container
-	// (future: distribute proportionally based on original limits)
-	containerName := ""
-	if len(pod.Spec.Containers) > 0 {
-		containerName = pod.Spec.Containers[0].Name
+	// Apply to ALL containers proportionally based on original limits
+	// Compute total original limit across all containers
+	totalOriginalLimit := int64(0)
+	containerLimits := make(map[string]int64)
+	for _, container := range pod.Spec.Containers {
+		if limit, ok := container.Resources.Limits[corev1.ResourceCPU]; ok {
+			limitMilli := limit.MilliValue()
+			containerLimits[container.Name] = limitMilli
+			totalOriginalLimit += limitMilli
+		} else if request, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+			// Use request if no limit
+			requestMilli := request.MilliValue()
+			containerLimits[container.Name] = requestMilli
+			totalOriginalLimit += requestMilli
+		} else {
+			// No CPU specified, use baseline as estimate
+			baselineQty, _ := resource.ParseQuantity("100m")
+			baselineMilli := baselineQty.MilliValue()
+			containerLimits[container.Name] = baselineMilli
+			totalOriginalLimit += baselineMilli
+		}
 	}
-
-	opts := actuator.Options{
-		MaxRetries:  3,
-		Wait:        true,             // P1 Fix: Wait for resize to complete
-		WaitTimeout: 10 * time.Second, // Don't wait too long
-	}
-
-	// Use the new function that handles separate request and limit values
-	before, after, err := actuator.ApplyScalingWithResources(
-		ctx,
-		r.K8sClient,
-		pa.Spec.Namespace,
-		pa.Spec.PodName,
-		containerName,
-		desiredRequest, // CPU request
-		desiredCPU,     // CPU limit
-		"",             // No memory request change
-		"",             // No memory limit change
-		opts,
-	)
-	if err != nil {
-		return r.updateStatus(ctx, pa, PhaseFailed, "ActuatorError",
-			fmt.Sprintf("Failed to apply CPU resources: %v", err), nil)
+	
+	// Parse desired values (reuse already parsed quantities from above)
+	desiredLimitQty, _ := resource.ParseQuantity(desiredCPU)
+	desiredLimitMilli := desiredLimitQty.MilliValue()
+	// desiredRequestQty already parsed above, just get milli value
+	desiredRequestMilli := desiredRequestQty.MilliValue()
+	
+	// Declare before/after for verification
+	var before, after *corev1.Pod
+	
+	// If single container, use existing actuator path
+	if len(pod.Spec.Containers) == 1 {
+		opts := actuator.Options{
+			MaxRetries:  3,
+			Wait:        true,
+			WaitTimeout: 10 * time.Second,
+		}
+		before, after, err = actuator.ApplyScalingWithResources(
+			ctx,
+			r.K8sClient,
+			pa.Spec.Namespace,
+			pa.Spec.PodName,
+			pod.Spec.Containers[0].Name,
+			desiredRequest,
+			desiredCPU,
+			"",
+			"",
+			opts,
+		)
+		if err != nil {
+			return r.updateStatus(ctx, pa, PhaseFailed, "ActuatorError",
+				fmt.Sprintf("Failed to apply CPU resources: %v", err), nil)
+		}
+	} else {
+		// Multi-container: build patch with proportional allocation
+		containerPatches := make([]map[string]interface{}, 0, len(pod.Spec.Containers))
+		for _, container := range pod.Spec.Containers {
+			originalLimit := containerLimits[container.Name]
+			var containerLimitMilli, containerRequestMilli int64
+			
+			if totalOriginalLimit > 0 {
+				// Proportional allocation based on original limits
+				ratio := float64(originalLimit) / float64(totalOriginalLimit)
+				containerLimitMilli = int64(float64(desiredLimitMilli) * ratio)
+				containerRequestMilli = int64(float64(desiredRequestMilli) * ratio)
+			} else {
+				// Equal distribution if no original limits
+				containerLimitMilli = desiredLimitMilli / int64(len(pod.Spec.Containers))
+				containerRequestMilli = desiredRequestMilli / int64(len(pod.Spec.Containers))
+			}
+			
+			// Ensure minimums (100m)
+			if containerLimitMilli < 100 {
+				containerLimitMilli = 100
+			}
+			if containerRequestMilli < 100 {
+				containerRequestMilli = 100
+			}
+			
+			containerLimitQty := resource.NewMilliQuantity(containerLimitMilli, resource.DecimalSI)
+			containerRequestQty := resource.NewMilliQuantity(containerRequestMilli, resource.DecimalSI)
+			
+			containerPatches = append(containerPatches, map[string]interface{}{
+				"name": container.Name,
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"cpu": containerRequestQty.String(),
+					},
+					"limits": map[string]interface{}{
+						"cpu": containerLimitQty.String(),
+					},
+				},
+			})
+		}
+		
+		// Build patch for all containers
+		patchObj := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"containers": containerPatches,
+			},
+		}
+		
+		patchData, err := json.Marshal(patchObj)
+		if err != nil {
+			return r.updateStatus(ctx, pa, PhaseFailed, "PatchError",
+				fmt.Sprintf("Failed to build patch: %v", err), nil)
+		}
+		
+		// Get pod before patch
+		before, err = r.K8sClient.CoreV1().Pods(pa.Spec.Namespace).Get(ctx, pa.Spec.PodName, metav1.GetOptions{})
+		if err != nil {
+			return r.updateStatus(ctx, pa, PhaseFailed, "PodNotFound",
+				fmt.Sprintf("Failed to get pod: %v", err), nil)
+		}
+		
+		// Apply patch via resize subresource
+		_, err = r.K8sClient.CoreV1().Pods(pa.Spec.Namespace).Patch(
+			ctx,
+			pa.Spec.PodName,
+			types.StrategicMergePatchType,
+			patchData,
+			metav1.PatchOptions{},
+			"resize",
+		)
+		if err != nil {
+			return r.updateStatus(ctx, pa, PhaseFailed, "ActuatorError",
+				fmt.Sprintf("Failed to apply CPU resources: %v", err), nil)
+		}
+		
+		// Wait for resize completion (reuse actuator's wait logic via Options)
+		opts := actuator.Options{
+			Wait:        true,
+			WaitTimeout: 10 * time.Second,
+			PollInterval: 500 * time.Millisecond,
+		}
+		// Use actuator's ApplyScaling to get wait functionality, but we've already patched
+		// So just fetch the pod after waiting
+		time.Sleep(500 * time.Millisecond) // Brief wait
+		after, err = r.K8sClient.CoreV1().Pods(pa.Spec.Namespace).Get(ctx, pa.Spec.PodName, metav1.GetOptions{})
+		if err != nil {
+			return r.updateStatus(ctx, pa, PhaseFailed, "PodNotFound",
+				fmt.Sprintf("Failed to verify pod after resize: %v", err), nil)
+		}
+		// Check if resize is still in progress
+		if len(after.Status.Resize) > 0 {
+			// Wait a bit more
+			deadline := time.Now().Add(opts.WaitTimeout)
+			for time.Now().Before(deadline) && len(after.Status.Resize) > 0 {
+				time.Sleep(opts.PollInterval)
+				after, err = r.K8sClient.CoreV1().Pods(pa.Spec.Namespace).Get(ctx, pa.Spec.PodName, metav1.GetOptions{})
+				if err != nil {
+					break
+				}
+			}
+		}
 	}
 
 	// P1 Fix: Verify the resize was actually applied by kubelet

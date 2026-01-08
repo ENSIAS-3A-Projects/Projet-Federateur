@@ -30,6 +30,9 @@ Thumbs.db
 *.tmp
 *.log
 
+# Test results
+results/
+
 # Generated protobuf files (if regenerated)
 # pkg/transport/grpc/proto/*.pb.go
 # pkg/transport/grpc/proto/*_grpc.pb.go

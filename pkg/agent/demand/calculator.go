@@ -4,17 +4,27 @@ package demand
 // Phase 4: Calculator extracts market parameters from pods using Kubernetes-native primitives.
 
 import (
+	"context"
+	"strconv"
+
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 
 	"mbcas/pkg/allocation"
 )
 
 // Calculator handles demand calculation and market parameter extraction.
-type Calculator struct{}
+type Calculator struct {
+	k8sClient kubernetes.Interface
+}
 
 // NewCalculator creates a new demand calculator.
-func NewCalculator() *Calculator {
-	return &Calculator{}
+func NewCalculator(k8sClient kubernetes.Interface) *Calculator {
+	return &Calculator{
+		k8sClient: k8sClient,
+	}
 }
 
 // ParamsForPod extracts market parameters from a pod using Kubernetes-native primitives.
@@ -75,8 +85,23 @@ func (c *Calculator) ParamsForPod(
 		weight = 1.0
 	}
 
-	// Optional: Multiply by PriorityClass factor (future enhancement)
-	// For now, use weight as-is
+	// Apply PriorityClass-based priority multiplier (Kubernetes-native)
+	// Note: We use context.Background() here since this is called from agent loops
+	// In production, consider passing context through the call chain
+	priorityMultiplier := c.getPriorityMultiplier(context.Background(), pod)
+	
+	// Apply annotation-based override if present (mbcas.io/priority-multiplier)
+	if annMultiplier, ok := pod.Annotations["mbcas.io/priority-multiplier"]; ok {
+		if parsed, err := strconv.ParseFloat(annMultiplier, 64); err == nil && parsed > 0 {
+			priorityMultiplier = parsed
+			klog.V(5).InfoS("Using annotation-based priority multiplier",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"multiplier", priorityMultiplier)
+		}
+	}
+
+	weight = weight * priorityMultiplier
 
 	// Compute effective bid: weight × demand
 	bid := weight * demand
@@ -106,7 +131,7 @@ func (c *Calculator) ParamsForPod(
 		maxMilli = minMilli
 	}
 
-	return allocation.PodParams{
+	params := allocation.PodParams{
 		Demand:           demand,
 		Bid:              bid,
 		MinMilli:         minMilli,
@@ -114,6 +139,9 @@ func (c *Calculator) ParamsForPod(
 		Weight:           weight,
 		ActualUsageMilli: 0, // Legacy function, no actual usage
 	}
+	
+	
+	return params
 }
 
 // ParamsForPodWithUsage extracts market parameters including actual CPU usage.
@@ -139,4 +167,65 @@ func filterNormalContainers(pod *corev1.Pod) []corev1.Container {
 	// Note: InitContainers are in pod.Spec.InitContainers
 	// EphemeralContainers are in pod.Spec.EphemeralContainers
 	// Neither are included in pod.Spec.Containers by Kubernetes design.
+}
+
+// getPriorityMultiplier computes priority multiplier from Kubernetes PriorityClass.
+// Returns 1.0 if no PriorityClass is set.
+// Higher priority values result in higher multipliers (logarithmic scaling).
+func (c *Calculator) getPriorityMultiplier(ctx context.Context, pod *corev1.Pod) float64 {
+	if pod.Spec.PriorityClassName == "" {
+		return 1.0 // Default: no priority boost
+	}
+
+	// Fetch PriorityClass
+	pc, err := c.k8sClient.SchedulingV1().PriorityClasses().Get(ctx, pod.Spec.PriorityClassName, metav1.GetOptions{})
+	if err != nil {
+		// PriorityClass not found or error - log and return default
+		klog.V(5).InfoS("Could not fetch PriorityClass, using default multiplier",
+			"pod", pod.Name,
+			"namespace", pod.Namespace,
+			"priorityClass", pod.Spec.PriorityClassName,
+			"error", err)
+		return 1.0
+	}
+
+	// Convert priority value to multiplier
+	// Priority values typically range from -1000 to 1000000
+	// Use linear scaling: priority 1000 = 1.0x, priority 2000 = 1.5x, priority 10000 = 2.0x
+	priorityValue := float64(pc.Value)
+	if priorityValue <= 0 {
+		return 1.0
+	}
+
+	// Linear scaling: priority 1000 = 1.0x, priority 10000 = 2.0x
+	multiplier := 1.0 + (priorityValue/10000.0) * 1.0
+	if multiplier < 0.1 {
+		multiplier = 0.1 // Minimum 0.1x
+	}
+	if multiplier > 10.0 {
+		multiplier = 10.0 // Maximum 10.0x
+	}
+
+	klog.V(5).InfoS("Computed priority multiplier from PriorityClass",
+		"pod", pod.Name,
+		"namespace", pod.Namespace,
+		"priorityClass", pod.Spec.PriorityClassName,
+		"priorityValue", pc.Value,
+		"multiplier", multiplier)
+
+	return multiplier
+}
+
+// getQoSClass returns the QoS class of the pod (Guaranteed, Burstable, or BestEffort).
+func getQoSClass(pod *corev1.Pod) corev1.PodQOSClass {
+	return pod.Status.QOSClass
+}
+
+// isReclaimable returns true if the pod's CPU can be aggressively reclaimed during contention.
+// BestEffort and Burstable pods are reclaimable; Guaranteed pods are not.
+func isReclaimable(pod *corev1.Pod) bool {
+	qos := getQoSClass(pod)
+	// BestEffort and Burstable pods can be reclaimed
+	// Guaranteed pods have strict limits and should not be reduced below requests
+	return qos == corev1.PodQOSBestEffort || qos == corev1.PodQOSBurstable
 }

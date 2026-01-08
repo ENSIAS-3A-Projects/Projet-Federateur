@@ -2,7 +2,10 @@ package demand
 
 // Package demand implements demand signal tracking and smoothing.
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Tracker tracks and smooths demand signals using exponential moving average.
 // Implements "fast up, slow down" behavior to avoid oscillations.
@@ -33,16 +36,26 @@ func NewTracker() *Tracker {
 // Uses exponential moving average with different rates for increases vs decreases.
 func (t *Tracker) Update(rawDemand float64) float64 {
 	const (
-		alphaIncrease      = 0.3 // Fast response to increases
-		alphaDecrease      = 0.2 // FIXED: Increased from 0.1 for faster scaling down
+		alphaIncrease      = 0.6 // Fast response to increases (increased from 0.3 for faster reaction)
+		alphaDecrease      = 0.2 // Slow decay to avoid oscillations
 		fastDecayThreshold = 5   // After 5 consecutive zeros, use fast decay
 		fastDecayAlpha     = 0.5 // Fast decay rate
+		rapidIncreaseAlpha = 0.8 // Very fast response for rapid increases
+		rapidIncreaseThreshold = 0.3 // If increase > 30% of current, use rapid alpha
 	)
 
 	var alpha float64
 	if rawDemand > t.smoothed {
 		// Fast up: use higher alpha
-		alpha = alphaIncrease
+		// Detect rapid increases (rate of change > threshold)
+		increaseRate := (rawDemand - t.smoothed) / math.Max(t.smoothed, 0.01) // Avoid division by zero
+		if increaseRate > rapidIncreaseThreshold {
+			// Very rapid increase: use fastest alpha
+			alpha = rapidIncreaseAlpha
+		} else {
+			// Normal increase: use standard fast alpha
+			alpha = alphaIncrease
+		}
 		t.zeroCount = 0 // Reset zero counter on any increase
 	} else if rawDemand == 0 {
 		// Track consecutive zeros for accelerated decay

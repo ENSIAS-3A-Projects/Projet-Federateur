@@ -1,0 +1,226 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: evaluation
+---
+# PriorityClass for critical workloads (gateway, workers)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority
+value: 10000
+description: "High priority for critical-path workloads (gateway, workers)"
+---
+# PriorityClass for background noise (low priority, reclaimable)
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority
+value: 100
+description: "Low priority for background noise workloads (reclaimable)"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: evaluation
+spec:
+  selector:
+    app: gateway
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-a
+  namespace: evaluation
+spec:
+  selector:
+    app: worker-a
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-b
+  namespace: evaluation
+spec:
+  selector:
+    app: worker-b
+  ports:
+  - port: 80
+    targetPort: 8080
+---
+# Gateway Deployment (Mode C: CoAllocator)
+# Critical-path workload: Guaranteed QoS + High Priority + Minimum CPU floor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: evaluation
+  labels:
+    app: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+        mbcas.io/managed: "true" # MANAGED by CoAllocator
+      annotations:
+        mbcas.io/min-cpu: "100m" # Minimum CPU floor for critical workload
+    spec:
+      priorityClassName: high-priority # High priority for preferential allocation
+      containers:
+      - name: gateway
+        image: eval-service:latest
+        imagePullPolicy: Never
+        env:
+        - name: ROLE
+          value: "gateway"
+        - name: TARGET_A_URL
+          value: "http://worker-a"
+        - name: TARGET_B_URL
+          value: "http://worker-b"
+        resources:
+          # Guaranteed QoS: requests == limits for aggressive fast-up behavior
+          requests:
+            cpu: "200m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "128Mi"
+---
+# Worker A Deployment
+# Critical-path workload: Guaranteed QoS + High Priority + Minimum CPU floor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-a
+  namespace: evaluation
+  labels:
+    app: worker-a
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-a
+  template:
+    metadata:
+      labels:
+        app: worker-a
+        mbcas.io/managed: "true" # MANAGED
+      annotations:
+        mbcas.io/min-cpu: "400m" # Minimum CPU floor for critical workload
+    spec:
+      priorityClassName: high-priority # High priority for preferential allocation
+      containers:
+      - name: worker-a
+        image: eval-service:latest
+        imagePullPolicy: Never
+        env:
+        - name: ROLE
+          value: "worker-a"
+        - name: CPU_LOAD_MS
+          value: "30"
+        resources:
+          # Guaranteed QoS: requests == limits for aggressive fast-up behavior
+          requests:
+            cpu: "800m"
+            memory: "128Mi"
+          limits:
+            cpu: "800m"
+            memory: "128Mi"
+---
+# Worker B Deployment
+# Critical-path workload: Guaranteed QoS + High Priority + Minimum CPU floor
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-b
+  namespace: evaluation
+  labels:
+    app: worker-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-b
+  template:
+    metadata:
+      labels:
+        app: worker-b
+        mbcas.io/managed: "true" # MANAGED
+      annotations:
+        mbcas.io/min-cpu: "400m" # Minimum CPU floor for critical workload
+    spec:
+      priorityClassName: high-priority # High priority for preferential allocation
+      containers:
+      - name: worker-b
+        image: eval-service:latest
+        imagePullPolicy: Never
+        env:
+        - name: ROLE
+          value: "worker-b"
+        - name: CPU_LOAD_MS
+          value: "30"
+        - name: SPIKE_PROB
+          value: "0.2"
+        - name: SPIKE_MULT
+          value: "5.0"
+        resources:
+          # Guaranteed QoS: requests == limits for aggressive fast-up behavior
+          requests:
+            cpu: "800m"
+            memory: "128Mi"
+          limits:
+            cpu: "800m"
+            memory: "128Mi"
+---
+# Background Noise Deployment
+# Reclaimable workload: BestEffort QoS + Low Priority + Very low minimum
+# MBCAS can aggressively reclaim CPU from these pods during contention
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: noise
+  namespace: evaluation
+  labels:
+    app: noise
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: noise
+  template:
+    metadata:
+      labels:
+        app: noise
+        mbcas.io/managed: "true" # MANAGED - MBCAS can reclaim from noise pods
+      annotations:
+        mbcas.io/min-cpu: "50m" # Very low minimum - highly reclaimable
+    spec:
+      priorityClassName: low-priority # Low priority - can be preempted/reclaimed
+      containers:
+      - name: noise
+        image: eval-service:latest
+        imagePullPolicy: Never
+        env:
+        - name: ROLE
+          value: "noise"
+        - name: NOISE_INTENSITY
+          value: "0.8"
+        resources:
+          # Burstable QoS: no requests but has limits = reclaimable
+          # MBCAS can reduce these to very low values during contention
+          # Note: We set limits to prevent OOMKill, but no requests makes it reclaimable
+          limits:
+            cpu: "1000m" # Max limit, but MBCAS will reduce via PodAllocation
+            memory: "128Mi"

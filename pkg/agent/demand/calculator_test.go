@@ -9,7 +9,7 @@ import (
 )
 
 func TestParamsForPod_WithRequestsAndLimits(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -60,7 +60,7 @@ func TestParamsForPod_WithRequestsAndLimits(t *testing.T) {
 }
 
 func TestParamsForPod_NoRequests(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -101,7 +101,7 @@ func TestParamsForPod_NoRequests(t *testing.T) {
 }
 
 func TestParamsForPod_NoLimits(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -128,7 +128,7 @@ func TestParamsForPod_NoLimits(t *testing.T) {
 }
 
 func TestParamsForPod_DemandClamping(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -164,7 +164,7 @@ func TestParamsForPod_DemandClamping(t *testing.T) {
 }
 
 func TestParamsForPod_NoContainers(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -190,7 +190,7 @@ func TestParamsForPod_NoContainers(t *testing.T) {
 }
 
 func TestParamsForPod_MinMaxSanityCheck(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -218,7 +218,7 @@ func TestParamsForPod_MinMaxSanityCheck(t *testing.T) {
 }
 
 func TestParamsForPod_PerPodMaxCap(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
@@ -246,7 +246,7 @@ func TestParamsForPod_PerPodMaxCap(t *testing.T) {
 }
 
 func TestParamsForPod_WeightComputation(t *testing.T) {
-	calc := NewCalculator()
+	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
 	
 	testCases := []struct {
 		name          string

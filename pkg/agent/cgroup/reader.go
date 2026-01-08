@@ -131,11 +131,12 @@ func directoryNames(entries []os.DirEntry) []string {
 // For multi-container pods, this aggregates across containers implicitly.
 //
 // Thread-safe: protected by internal mutex.
+// Implements retry logic with exponential backoff for transient failures.
 func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
-	cgroupPath, err := r.findPodCgroupPath(pod)
+	cgroupPath, err := r.findPodCgroupPathWithRetry(pod)
 	if err != nil {
 		// FIXED: Log at higher verbosity to make failures visible
-		klog.V(2).InfoS("Cgroup path not found for pod",
+		klog.V(2).InfoS("Cgroup path not found for pod after retries",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"uid", pod.UID,
@@ -143,8 +144,8 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 		return 0.0, fmt.Errorf("find cgroup path: %w", err)
 	}
 
-	// Read current CPU statistics
-	sample, err := r.readCPUSample(cgroupPath)
+	// Read current CPU statistics with retry
+	sample, err := r.readCPUSampleWithRetry(cgroupPath, pod)
 	if err != nil {
 		return 0.0, fmt.Errorf("read CPU sample: %w", err)
 	}
@@ -197,6 +198,7 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 				"deltaUsage", deltaUsage,
 				"throttlingRatio", throttlingRatio,
 				"normalizedDemand", demand)
+			
 		} else {
 			// deltaUsage <= 0: counter reset or no activity
 			demand = 0.0
@@ -217,12 +219,13 @@ func (r *Reader) ReadPodDemand(pod *corev1.Pod) (float64, error) {
 // ReadPodMetrics reads both demand signal and actual CPU usage for a pod.
 // Returns DemandResult with normalized demand [0,1] and actual usage in millicores.
 // Thread-safe: protected by internal mutex.
+// Implements retry logic with exponential backoff for transient failures.
 func (r *Reader) ReadPodMetrics(pod *corev1.Pod, sampleIntervalSeconds float64) (DemandResult, error) {
 	result := DemandResult{}
 
-	cgroupPath, err := r.findPodCgroupPath(pod)
+	cgroupPath, err := r.findPodCgroupPathWithRetry(pod)
 	if err != nil {
-		klog.V(2).InfoS("Cgroup path not found for pod",
+		klog.V(2).InfoS("Cgroup path not found for pod after retries",
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"uid", pod.UID,
@@ -230,8 +233,8 @@ func (r *Reader) ReadPodMetrics(pod *corev1.Pod, sampleIntervalSeconds float64) 
 		return result, fmt.Errorf("find cgroup path: %w", err)
 	}
 
-	// Read current CPU statistics
-	sample, err := r.readCPUSample(cgroupPath)
+	// Read current CPU statistics with retry
+	sample, err := r.readCPUSampleWithRetry(cgroupPath, pod)
 	if err != nil {
 		return result, fmt.Errorf("read CPU sample: %w", err)
 	}
@@ -351,6 +354,109 @@ func (r *Reader) findPodCgroupPath(pod *corev1.Pod) (string, error) {
 	}
 
 	return "", fmt.Errorf("cgroup path not found for pod %s", pod.UID)
+}
+
+// readCPUSampleWithRetry reads CPU statistics with retry logic for transient failures.
+func (r *Reader) readCPUSampleWithRetry(cgroupPath string, pod *corev1.Pod) (*PodSample, error) {
+	const maxRetries = 3
+	backoffDurations := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		sample, err := r.readCPUSample(cgroupPath)
+		if err == nil {
+			return sample, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable (transient filesystem issues)
+		if !isRetryableError(err) {
+			// Non-retryable error (e.g., parse error), return immediately
+			return nil, err
+		}
+
+		// If not the last attempt, wait before retrying
+		if attempt < maxRetries-1 {
+			backoff := backoffDurations[attempt]
+			klog.V(3).InfoS("Retrying cgroup read after transient error",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"attempt", attempt+1,
+				"maxRetries", maxRetries,
+				"backoff", backoff,
+				"error", err)
+			time.Sleep(backoff)
+		}
+	}
+
+	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// findPodCgroupPathWithRetry finds cgroup path with retry logic.
+func (r *Reader) findPodCgroupPathWithRetry(pod *corev1.Pod) (string, error) {
+	const maxRetries = 2
+	backoffDurations := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		path, err := r.findPodCgroupPath(pod)
+		if err == nil {
+			return path, nil
+		}
+
+		lastErr = err
+
+		// If not the last attempt, wait before retrying
+		if attempt < maxRetries-1 {
+			backoff := backoffDurations[attempt]
+			klog.V(3).InfoS("Retrying cgroup path discovery",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"attempt", attempt+1,
+				"backoff", backoff)
+			time.Sleep(backoff)
+		}
+	}
+
+	return "", lastErr
+}
+
+// isRetryableError checks if an error is transient and retryable.
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Check for transient filesystem errors
+	retryablePatterns := []string{
+		"no such file",
+		"permission denied",
+		"temporary failure",
+		"resource temporarily unavailable",
+		"i/o timeout",
+	}
+
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+
+	// Check for filesystem-related errors (likely retryable)
+	if strings.Contains(errStr, "path") || strings.Contains(errStr, "file") {
+		// Likely a filesystem error, retryable
+		return true
+	}
+
+	// Parse errors and other non-transient errors are not retryable
+	if strings.Contains(errStr, "parse") || strings.Contains(errStr, "invalid") {
+		return false
+	}
+
+	// Default: assume retryable for filesystem operations
+	return true
 }
 
 // readCPUSample reads CPU statistics from a cgroup path.

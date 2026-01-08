@@ -1,0 +1,90 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mbcas-agent-config
+  namespace: mbcas-system
+  labels:
+    app.kubernetes.io/name: mbcas
+    app.kubernetes.io/component: agent
+data:
+  # SamplingInterval is how often we sample kernel signals.
+  # Format: Go duration string (e.g., "1s", "500ms", "2m")
+  samplingInterval: "1s"
+
+  # WriteInterval is how often we write PodAllocation updates to the API.
+  # Format: Go duration string
+  writeInterval: "5s"
+
+  # MinChangePercent is the minimum change required to write an update (hysteresis).
+  # Value: 0.0 to 100.0 (percentage)
+  minChangePercent: "2.0"
+
+  # SystemReservePercent is the percentage of node CPU to reserve for system.
+  # Value: 0.0 to 100.0 (percentage)
+  systemReservePercent: "10.0"
+
+  # BaselineCPUPerPod is the minimum CPU to allocate per pod.
+  # Format: Kubernetes resource quantity (e.g., "100m", "500m", "1")
+  baselineCPUPerPod: "100m"
+
+  # StartupGracePeriod is the duration after startup during which
+  # allocations are only allowed to increase, not decrease.
+  # Format: Go duration string
+  startupGracePeriod: "45s"
+
+  # SLOTargetLatencyMs is the target p99 latency for SLO scoring (0 = disabled).
+  # Used for utility-based allocation.
+  # Value: milliseconds (e.g., "500" for 500ms)
+  sloTargetLatencyMs: "0"
+
+  # PrometheusURL is the URL for Prometheus API (empty = disabled).
+  # Used for querying latency metrics for SLO scoring.
+  # Example: "http://prometheus:9090"
+  prometheusURL: ""
+
+  # FastLoopInterval is the interval for the fast SLO guardrail loop (1-2s).
+  # This loop responds quickly to SLO violations and throttling pressure.
+  # Format: Go duration string
+  fastLoopInterval: "2s"
+
+  # SlowLoopInterval is the interval for the slow economic optimizer loop (5-15s).
+  # This loop runs market clearing and optimization.
+  # Format: Go duration string
+  slowLoopInterval: "10s"
+
+  # P99ThresholdMultiplier is the multiplier for p99 latency threshold.
+  # Fast loop triggers when p99 > target * P99ThresholdMultiplier.
+  # Value: > 0.0 (e.g., "1.2" means 20% above target)
+  p99ThresholdMultiplier: "1.2"
+
+  # ThrottlingThreshold is the throttling ratio threshold (0-1).
+  # Fast loop triggers when throttling ratio > ThrottlingThreshold.
+  # Value: 0.0 to 1.0 (e.g., "0.1" means 10% throttling)
+  throttlingThreshold: "0.1"
+
+  # FastStepSizeMin is the minimum fast-up step size (0-1).
+  # When fast loop triggers, allocation increases by at least this percentage.
+  # Value: 0.0 to 1.0 (e.g., "0.20" means 20% minimum increase)
+  fastStepSizeMin: "0.20"
+
+  # FastStepSizeMax is the maximum fast-up step size (0-1).
+  # When fast loop triggers, allocation increases by at most this percentage.
+  # Value: 0.0 to 1.0 (e.g., "0.40" means 40% maximum increase)
+  fastStepSizeMax: "0.40"
+
+  # AllocationMechanism selects the market clearing mechanism.
+  # Options: "nash" (Nash Bargaining, default) or "primal-dual" (Distributed Primal-Dual)
+  allocationMechanism: "nash"
+
+  # EnableKalmanPrediction enables Kalman filter for demand prediction.
+  # Value: "true" or "false"
+  enableKalmanPrediction: "true"
+
+  # EnableBatchReconciliation enables batch reconciliation of multiple PodAllocations.
+  # Value: "true" or "false"
+  enableBatchReconciliation: "true"
+
+  # CoalitionGroupingAnnotation is the annotation key for coalition grouping.
+  # Pods with the same annotation value are grouped for joint optimization.
+  coalitionGroupingAnnotation: "mbcas.io/coalition"
+
