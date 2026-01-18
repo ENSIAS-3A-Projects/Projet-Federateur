@@ -47,7 +47,8 @@ func NewWriter(config *rest.Config) (*Writer, error) {
 
 // WritePodAllocation creates or updates a PodAllocation CRD for a pod.
 // P0 Fix: Uses optimistic locking via resourceVersion and retry on conflict.
-func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desiredRequest, desiredLimit string) error {
+// shadowPrice is the current CPU shadow price to store in status (0 if not available).
+func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desiredRequest, desiredLimit string, shadowPrice float64) error {
 	// Use pod UID as the PodAllocation name
 	paName := string(pod.UID)
 
@@ -70,6 +71,9 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 				PodName:           pod.Name,
 				DesiredCPURequest: desiredRequest,
 				DesiredCPULimit:   desiredLimit,
+			},
+			Status: v1alpha1.PodAllocationStatus{
+				ShadowPriceCPU: shadowPrice,
 			},
 		}
 
@@ -98,7 +102,19 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 
 	currentRequest, _, _ := unstructured.NestedString(spec, "desiredCPURequest")
 	currentLimit, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
-	if currentRequest == desiredRequest && currentLimit == desiredLimit {
+
+	// Check if shadow price needs updating (even if spec hasn't changed)
+	status, found, err := unstructured.NestedMap(pa.UnstructuredContent(), "status")
+	if err != nil || !found {
+		status = make(map[string]interface{})
+	}
+	currentShadowPrice, _, _ := unstructured.NestedFloat64(status, "shadowPriceCPU")
+
+	// Initial check - but we'll re-evaluate inside retry loop
+	initialSpecNeedsUpdate := currentRequest != desiredRequest || currentLimit != desiredLimit
+	initialShadowPriceNeedsUpdate := currentShadowPrice != shadowPrice
+
+	if !initialSpecNeedsUpdate && !initialShadowPriceNeedsUpdate {
 		// No update needed
 		return nil
 	}
@@ -111,26 +127,74 @@ func (w *Writer) WritePodAllocation(ctx context.Context, pod *corev1.Pod, desire
 			return fmt.Errorf("re-fetch PodAllocation: %w", err)
 		}
 
+		// Re-evaluate conditions INSIDE retry after re-fetching
 		spec, found, err := unstructured.NestedMap(pa.UnstructuredContent(), "spec")
 		if err != nil || !found {
 			return fmt.Errorf("get spec: %w", err)
 		}
 
-		previousRequest, _, _ := unstructured.NestedString(spec, "desiredCPURequest")
-		previousLimit, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
-		unstructured.SetNestedField(spec, desiredRequest, "desiredCPURequest")
-		unstructured.SetNestedField(spec, desiredLimit, "desiredCPULimit")
-		unstructured.SetNestedField(pa.UnstructuredContent(), spec, "spec")
+		currentRequest, _, _ := unstructured.NestedString(spec, "desiredCPURequest")
+		currentLimit, _, _ := unstructured.NestedString(spec, "desiredCPULimit")
 
-		// Update preserves resourceVersion from the fetched object
-		_, err = w.dynamicClient.Resource(w.gvr).Namespace(pod.Namespace).Update(ctx, pa, metav1.UpdateOptions{})
-		if err != nil {
-			return err // retry.RetryOnConflict will retry if this is a conflict
+		status, found, _ := unstructured.NestedMap(pa.UnstructuredContent(), "status")
+		if !found {
+			status = make(map[string]interface{})
+		}
+		currentShadowPrice, _, _ := unstructured.NestedFloat64(status, "shadowPriceCPU")
+
+		// Re-evaluate conditions
+		specNeedsUpdate := currentRequest != desiredRequest || currentLimit != desiredLimit
+		shadowPriceNeedsUpdate := currentShadowPrice != shadowPrice
+
+		if !specNeedsUpdate && !shadowPriceNeedsUpdate {
+			return nil // No update needed
 		}
 
-		klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace,
-			"request", desiredRequest, "previousRequest", previousRequest,
-			"limit", desiredLimit, "previousLimit", previousLimit)
+		// Update spec if needed
+		var previousRequest, previousLimit string
+		if specNeedsUpdate {
+			previousRequest, _, _ = unstructured.NestedString(spec, "desiredCPURequest")
+			previousLimit, _, _ = unstructured.NestedString(spec, "desiredCPULimit")
+			unstructured.SetNestedField(spec, desiredRequest, "desiredCPURequest")
+			unstructured.SetNestedField(spec, desiredLimit, "desiredCPULimit")
+			unstructured.SetNestedField(pa.UnstructuredContent(), spec, "spec")
+		}
+
+		// Perform updates
+		if specNeedsUpdate {
+			// Update spec first
+			var err error
+			pa, err = w.dynamicClient.Resource(w.gvr).Namespace(pod.Namespace).Update(ctx, pa, metav1.UpdateOptions{})
+			if err != nil {
+				return err // retry.RetryOnConflict will retry if this is a conflict
+			}
+		}
+
+		if shadowPriceNeedsUpdate {
+			// Update status (must be done via status subresource if enabled)
+			// Re-fetch or ensure we have current status object in pa
+			status, _, _ = unstructured.NestedMap(pa.UnstructuredContent(), "status")
+			if status == nil {
+				status = make(map[string]interface{})
+			}
+			unstructured.SetNestedField(status, shadowPrice, "shadowPriceCPU")
+			unstructured.SetNestedField(pa.UnstructuredContent(), status, "status")
+
+			_, err = w.dynamicClient.Resource(w.gvr).Namespace(pod.Namespace).UpdateStatus(ctx, pa, metav1.UpdateOptions{})
+			if err != nil {
+				return err // retry.RetryOnConflict will retry if this is a conflict
+			}
+		}
+
+		if specNeedsUpdate {
+			klog.V(4).InfoS("Updated PodAllocation", "name", paName, "namespace", pod.Namespace,
+				"request", desiredRequest, "previousRequest", previousRequest,
+				"limit", desiredLimit, "previousLimit", previousLimit,
+				"shadowPrice", shadowPrice)
+		} else {
+			klog.V(4).InfoS("Updated PodAllocation shadow price", "name", paName, "namespace", pod.Namespace,
+				"shadowPrice", shadowPrice)
+		}
 		return nil
 	})
 }

@@ -84,6 +84,12 @@ type PodAllocationStatus struct {
 
 	// LastAttemptTime is the timestamp of the last attempt to apply the CPU resources.
 	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
+
+	// ShadowPriceCPU is the current CPU shadow price (Lagrange multiplier).
+	// Agents can read this to adjust their demand based on market conditions.
+	// Higher prices indicate resource scarcity, causing agents to reduce demand.
+	// Lower prices indicate resource abundance, allowing agents to increase demand.
+	ShadowPriceCPU float64 `json:"shadowPriceCPU"`
 }
 
 // PodAllocationList contains a list of PodAllocation objects.

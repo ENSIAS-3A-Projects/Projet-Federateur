@@ -1,0 +1,92 @@
+# VPA configurations for all workloads
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: gateway-vpa
+  namespace: vpa-mbcas-test
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: gateway-vpa
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: "100m"
+        memory: "64Mi"
+      maxAllowed:
+        cpu: "2000m"
+        memory: "512Mi"
+      controlledResources: ["cpu", "memory"]
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: worker-a-vpa
+  namespace: vpa-mbcas-test
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: worker-a-vpa
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: "100m"
+        memory: "64Mi"
+      maxAllowed:
+        cpu: "2000m"
+        memory: "512Mi"
+      controlledResources: ["cpu", "memory"]
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: worker-b-vpa
+  namespace: vpa-mbcas-test
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: worker-b-vpa
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: "100m"
+        memory: "64Mi"
+      maxAllowed:
+        cpu: "2000m"
+        memory: "512Mi"
+      controlledResources: ["cpu", "memory"]
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: noise-vpa
+  namespace: vpa-mbcas-test
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: noise-vpa
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "*"
+      minAllowed:
+        cpu: "50m"
+        memory: "32Mi"
+      maxAllowed:
+        cpu: "1000m"
+        memory: "256Mi"
+      controlledResources: ["cpu", "memory"]

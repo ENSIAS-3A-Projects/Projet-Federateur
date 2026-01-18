@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: stress-generator-{{TEST_TYPE}}
+  namespace: vpa-mbcas-test
+  labels:
+    app: stress-generator
+    test: {{TEST_TYPE}}
+spec:
+  containers:
+  - name: stress
+    image: curlimages/curl:latest
+    command: ["/bin/sh"]
+    args:
+    - -c
+    - |
+      echo "Stress generator started for {{PHASE_NAME}}. Waiting for services..."
+      sleep 15
+      
+      generate_load() {
+        local target=$1
+        local rps=$2
+        local duration=$3
+        local phase=$4
+        echo "[$(date +%H:%M:%S)] Phase: $phase - Target: $target, RPS: $rps, Duration: ${duration}s"
+        local end_time=$(($(date +%s) + duration))
+        local requests=0
+        local sleep_time=$(awk "BEGIN {printf \"%.3f\", 1/$rps}")
+        while [ $(date +%s) -lt $end_time ]; do
+          curl -s -m 5 "$target" > /dev/null 2>&1 || true
+          requests=$((requests + 1))
+          sleep $sleep_time
+        done
+        echo "[$(date +%H:%M:%S)] Completed $phase: $requests requests"
+      }
+      
+      GATEWAY="http://gateway-{{TEST_TYPE}}:8080"
+      echo "=== PHASE 1: WARMUP (2 minutes) ==="
+      generate_load "$GATEWAY" 10 120 "{{PHASE_NAME}}-warmup"
+      echo "=== PHASE 2: SATURATION (5 minutes) ==="
+      generate_load "$GATEWAY" 50 300 "{{PHASE_NAME}}-saturation"
+      echo "=== PHASE 3: CONTENTION (5 minutes) ==="
+      generate_load "$GATEWAY" 100 300 "{{PHASE_NAME}}-contention"
+      echo "=== PHASE 4: BURSTY (3 minutes) ==="
+      for i in $(seq 1 18); do
+        if [ $((i % 3)) -eq 0 ]; then
+          generate_load "$GATEWAY" 100 10 "{{PHASE_NAME}}-burst"
+        else
+          generate_load "$GATEWAY" 50 10 "{{PHASE_NAME}}-normal"
+        fi
+      done
+      echo "=== STRESS TEST COMPLETE ==="
+      sleep 30
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "64Mi"
+      limits:
+        cpu: "500m"
+        memory: "128Mi"

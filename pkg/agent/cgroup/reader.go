@@ -497,15 +497,24 @@ func (r *Reader) readCPUSample(cgroupPath string) (*PodSample, error) {
 	return sample, nil
 }
 
-// Cleanup removes samples for pods that no longer exist.
+// Cleanup removes samples and path cache entries for pods that no longer exist.
 func (r *Reader) Cleanup(existingPods map[string]bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Clean samples
 	for key := range r.samples {
 		if !existingPods[key] {
 			delete(r.samples, key)
 			klog.V(5).InfoS("Cleaned up cgroup sample", "podUID", key)
+		}
+	}
+
+	// Clean path cache
+	for key := range r.pathCache {
+		if !existingPods[key] {
+			delete(r.pathCache, key)
+			klog.V(5).InfoS("Cleaned up cgroup path cache", "podUID", key)
 		}
 	}
 }

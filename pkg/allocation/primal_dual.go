@@ -87,7 +87,8 @@ func PrimalDualPriceClearing(
 	allocations := make(map[types.UID]int64)
 	converged := false
 
-	for iteration := 0; iteration < coordinator.MaxIterations; iteration++ {
+	iteration := 0
+	for ; iteration < coordinator.MaxIterations; iteration++ {
 		// Step 1: Each agent computes best-response given current price
 		totalDemand := int64(0)
 		for _, agent := range agents {
@@ -132,7 +133,7 @@ func PrimalDualPriceClearing(
 	return PrimalDualResult{
 		Allocations: allocations,
 		ShadowPrice: coordinator.Lambda,
-		Iterations:    len(allocations), // Track iterations
+		Iterations:  iteration, // Track actual iterations
 		Converged:   converged,
 	}
 }
@@ -274,6 +275,9 @@ func ValidatePrimalDualResult(result PrimalDualResult, capacityMilli int64, agen
 
 	return nil
 }
+
+
+
 
 
 

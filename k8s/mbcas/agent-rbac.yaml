@@ -9,33 +9,34 @@ kind: ClusterRole
 metadata:
   name: mbcas-agent
 rules:
-# Pod permissions (for discovery)
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
-  - watch
-# Node permissions (for capacity)
-- apiGroups:
-  - ""
-  resources:
-  - nodes
-  verbs:
-  - get
-# PodAllocation CRD permissions
-- apiGroups:
-  - allocation.mbcas.io
-  resources:
-  - podallocations
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - patch
+  # Pod permissions (for discovery)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  # Node permissions (for capacity)
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+  # PodAllocation CRD permissions
+  - apiGroups:
+      - allocation.mbcas.io
+    resources:
+      - podallocations
+      - podallocations/status
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -46,8 +47,6 @@ roleRef:
   kind: ClusterRole
   name: mbcas-agent
 subjects:
-- kind: ServiceAccount
-  name: mbcas-agent
-  namespace: mbcas-system
-
-
+  - kind: ServiceAccount
+    name: mbcas-agent
+    namespace: mbcas-system

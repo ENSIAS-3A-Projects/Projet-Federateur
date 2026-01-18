@@ -79,6 +79,7 @@ type Agent struct {
 	allocations      map[types.UID]string // pod UID -> current allocation
 	originalLimits   map[types.UID]int64  // pod UID -> original CPU limit in millicores (preserved across resizes)
 	originalRequests map[types.UID]int64  // pod UID -> original CPU request in millicores (preserved across resizes)
+	podSampled       map[types.UID]bool   // pod UID -> whether the pod has been successfully sampled
 	mu               sync.RWMutex
 
 	// Startup grace period tracking
@@ -114,6 +115,10 @@ type Agent struct {
 
 	// Kalman filter predictor for demand forecasting
 	predictor *demand.Predictor
+
+	// Agent-based modeling: per-pod agent states
+	agentStates map[types.UID]*PodAgentState
+	ql          *QLearning // Q-learning instance for all agents
 }
 
 // NewAgent creates a new node agent.
@@ -163,15 +168,25 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 
 	// Create Lyapunov stability controller
 	lyapunovController := stability.NewLyapunovController(
-		0.1,  // initialStepSize
-		0.2,  // minStepSize (increased from 0.01 for faster convergence)
-		1.0,  // maxStepSize
+		0.1, // initialStepSize
+		0.2, // minStepSize (increased from 0.01 for faster convergence)
+		1.0, // maxStepSize
 	)
 
 	// Create Kalman filter predictor for demand forecasting (if enabled)
 	var predictor *demand.Predictor
 	if config.EnableKalmanPrediction {
 		predictor = demand.NewPredictor()
+	}
+
+	// Initialize Q-learning if agent-based modeling is enabled
+	var ql *QLearning
+	if config.EnableAgentBasedModeling {
+		ql = NewQLearning(
+			config.AgentLearningRate,
+			config.AgentDiscountFactor,
+			config.AgentExplorationRate,
+		)
 	}
 
 	agent := &Agent{
@@ -184,6 +199,7 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 		allocations:        make(map[types.UID]string),
 		originalLimits:     make(map[types.UID]int64),
 		originalRequests:   make(map[types.UID]int64),
+		podSampled:         make(map[types.UID]bool),
 		cgroupReader:       cgroupReader,
 		demandCalc:         demandCalc,
 		writer:             writer,
@@ -195,6 +211,8 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 		latencyQuerier:     latencyQuerier,
 		lyapunovController: lyapunovController,
 		predictor:          predictor,
+		agentStates:        make(map[types.UID]*PodAgentState),
+		ql:                 ql,
 	}
 
 	// Create fast guardrail
@@ -311,7 +329,7 @@ func (a *Agent) sample() error {
 			if totalRequestMilli == 0 {
 				baselineQty, _ := resource.ParseQuantity(a.config.BaselineCPUPerPod)
 				baselineMilli := baselineQty.MilliValue()
-				
+
 				switch pod.Status.QOSClass {
 				case corev1.PodQOSGuaranteed:
 					// Guaranteed: use limit as request (or baseline if no limit)
@@ -391,6 +409,7 @@ func (a *Agent) sample() error {
 			}
 		} else {
 			tracker.RecordSuccess()
+			a.podSampled[pod.UID] = true
 		}
 
 		smoothedDemand := tracker.Update(rawDemand)
@@ -420,6 +439,7 @@ func (a *Agent) sample() error {
 			delete(a.allocations, uid)
 			delete(a.originalLimits, uid)
 			delete(a.originalRequests, uid)
+			delete(a.podSampled, uid)
 			klog.V(4).InfoS("Removed pod from tracking", "podUID", uid)
 		}
 	}
@@ -544,7 +564,7 @@ func (a *Agent) writeAllocations() error {
 			// Newly discovered pod: initialize with zero demand
 			// It will get sampled in the next sampling cycle
 			demands[uid] = 0.0
-			klog.V(4).InfoS("Initializing demand for newly discovered pod", 
+			klog.V(4).InfoS("Initializing demand for newly discovered pod",
 				"pod", pod.Name, "namespace", pod.Namespace)
 		}
 	}
@@ -637,7 +657,7 @@ func (a *Agent) writeAllocations() error {
 		// 1. Annotation mbcas.io/min-cpu (highest priority)
 		// 2. QoS class defaults (Guaranteed = request, Burstable/BestEffort = baseline)
 		// 3. Contention-aware adjustments (reclaimable pods get lower minimums during contention)
-		
+
 		// Detect contention: check if any Guaranteed pods are throttled
 		contentionDetected := false
 		a.mu.RLock()
@@ -649,16 +669,19 @@ func (a *Agent) writeAllocations() error {
 			}
 		}
 		a.mu.RUnlock()
-		
+
 		// Get minimum CPU from annotation (if present)
 		workloadMinMilli := getMinCPUFromAnnotation(pod, 0)
-		
+
 		// If no annotation, use QoS-based defaults
 		if workloadMinMilli == 0 {
 			switch pod.Status.QOSClass {
 			case corev1.PodQOSGuaranteed:
-				// Guaranteed pods: minimum = request (cannot go below request)
-				if len(pod.Spec.Containers) > 0 {
+				// Guaranteed pods: minimum = original request
+				// CRITICAL FIX: Use originalRequests instead of current pod.Spec.Containers[0].Resources.Requests
+				if originalReq, ok := a.originalRequests[uid]; ok {
+					workloadMinMilli = originalReq
+				} else if len(pod.Spec.Containers) > 0 {
 					if requestCPU, ok := pod.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]; ok {
 						workloadMinMilli = requestCPU.MilliValue()
 					}
@@ -742,7 +765,12 @@ func (a *Agent) writeAllocations() error {
 		shouldWriteResult := shouldWrite(currentAlloc, newAlloc, a.config.MinChangePercent)
 
 		if shouldWriteResult {
-			if err := a.writer.WritePodAllocation(a.ctx, pod, cpuRequest, cpuLimit); err != nil {
+			// Get current shadow price for status update
+			shadowPrice := 0.0
+			if a.shadowPrices != nil {
+				shadowPrice = a.shadowPrices.GetCPU()
+			}
+			if err := a.writer.WritePodAllocation(a.ctx, pod, cpuRequest, cpuLimit, shadowPrice); err != nil {
 				klog.ErrorS(err, "Failed to write PodAllocation", "pod", pod.Name, "namespace", pod.Namespace)
 				continue
 			}
@@ -759,6 +787,17 @@ func (a *Agent) writeAllocations() error {
 
 			klog.InfoS("Updated PodAllocation", "pod", pod.Name, "namespace", pod.Namespace,
 				"request", cpuRequest, "limit", cpuLimit, "previous", currentAlloc)
+		} else {
+			// Allocations didn't change, but update shadow price if it changed
+			// This ensures shadow price is always current even when allocations are stable
+			shadowPrice := 0.0
+			if a.shadowPrices != nil {
+				shadowPrice = a.shadowPrices.GetCPU()
+			}
+			// WritePodAllocation will check if shadow price needs updating and update only status if needed
+			if err := a.writer.WritePodAllocation(a.ctx, pod, cpuRequest, cpuLimit, shadowPrice); err != nil {
+				klog.V(4).InfoS("Failed to update shadow price (non-critical)", "pod", pod.Name, "namespace", pod.Namespace, "error", err)
+			}
 		}
 	}
 
@@ -819,7 +858,7 @@ func (a *Agent) discoverPods() ([]*corev1.Pod, error) {
 				klog.V(5).InfoS("Skipping pod with opt-out label", "pod", pod.Name, "namespace", pod.Namespace)
 				continue
 			} else {
-				klog.V(4).InfoS("Including BestEffort pod despite opt-out label (for CPU reclamation)", 
+				klog.V(4).InfoS("Including BestEffort pod despite opt-out label (for CPU reclamation)",
 					"pod", pod.Name, "namespace", pod.Namespace,
 					"qos", pod.Status.QOSClass)
 			}
@@ -870,29 +909,41 @@ func (a *Agent) computeAllocations(
 
 		// Get actual usage for this pod (0 if not available)
 		actualUsageMilli := a.podUsages[uid]
-		// If no usage tracked yet (newly discovered pod), estimate from current limits
-		if actualUsageMilli == 0 && len(pod.Spec.Containers) > 0 {
-			if limit, ok := pod.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; ok {
-				// Estimate usage based on QoS class
-				// BestEffort pods typically use more of their limit (contention sources)
-				// Guaranteed pods are more predictable
-				switch pod.Status.QOSClass {
-				case corev1.PodQOSBestEffort:
-					actualUsageMilli = limit.MilliValue() * 90 / 100 // BestEffort: assume 90% utilization
-				case corev1.PodQOSBurstable:
-					actualUsageMilli = limit.MilliValue() * 85 / 100 // Burstable: assume 85% utilization
-				default: // Guaranteed
-					actualUsageMilli = limit.MilliValue() * 80 / 100 // Guaranteed: assume 80% utilization
-				}
+
+		// If no usage tracked yet (unknown pod), estimate from original requests or baseline
+		// CRITICAL FIX: Only estimate if NEVER successfully sampled (!a.podSampled[uid]).
+		// If sampled but idle (actualUsageMilli == 0), don't estimate - it's truly idle.
+		if !a.podSampled[uid] && actualUsageMilli == 0 {
+			if originalReq, ok := a.originalRequests[uid]; ok && originalReq > 0 {
+				// Estimate from original request (safe baseline)
+				actualUsageMilli = originalReq
+			} else {
+				// Fallback to baseline
+				actualUsageMilli = baselineMilli
 			}
 		}
-		// Use the new function that includes actual usage
-		params := a.demandCalc.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
+		// Get shadow price from previous cycle for price response
+		shadowPriceCPU := 0.0
+		if a.shadowPrices != nil {
+			shadowPriceCPU = a.shadowPrices.GetCPU()
+		}
+
+		// Use price-responsive function if enabled, otherwise use standard function
+		var params allocation.PodParams
+		if a.config.EnablePriceResponse && shadowPriceCPU > 0 {
+			// Apply price response: agents adjust demand based on shadow prices
+			params = a.demandCalc.ParamsForPodWithPrice(
+				pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli,
+				shadowPriceCPU, true, 0.5) // elasticity = 0.5 (moderate responsiveness)
+		} else {
+			// Use standard function without price response
+			params = a.demandCalc.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
+		}
 
 		// CRITICAL FIX: Enforce minimum floors to prevent feedback loop
 		// This ensures allocations never drop below the intended initial values
 		// Minimums are determined by annotations or QoS-based defaults
-		
+
 		// Check if high-priority pods (Guaranteed) are throttled (contention detection)
 		highPriorityThrottled := false
 		for otherUID, otherDemand := range demands {
@@ -902,16 +953,20 @@ func (a *Agent) computeAllocations(
 				break
 			}
 		}
-		
+
 		// Get minimum from annotation (if present), otherwise use QoS-based defaults
 		workloadMinMilli := getMinCPUFromAnnotation(pod, 0)
-		
+
 		if workloadMinMilli == 0 {
 			// Use QoS-based defaults
 			switch pod.Status.QOSClass {
 			case corev1.PodQOSGuaranteed:
-				// Guaranteed: minimum = request (cannot go below request)
-				if len(pod.Spec.Containers) > 0 {
+				// Guaranteed: minimum = original request (cannot go below original request)
+				// CRITICAL FIX: Use originalRequests instead of current pod.Spec.Containers[0].Resources.Requests
+				// to prevent MBCAS from locking its own scaled-up requests as a permanent floor.
+				if originalReq, ok := a.originalRequests[uid]; ok {
+					workloadMinMilli = originalReq
+				} else if len(pod.Spec.Containers) > 0 {
 					if requestCPU, ok := pod.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU]; ok {
 						workloadMinMilli = requestCPU.MilliValue()
 					}
@@ -997,6 +1052,85 @@ func (a *Agent) computeAllocations(
 		shadowPriceCPU = a.shadowPrices.GetCPU()
 	}
 
+	// Agent-based modeling: get or create agent states and compute bids
+	if a.config.EnableAgentBasedModeling && a.ql != nil {
+		a.mu.Lock()
+		// Ensure agent states exist for all pods
+		for uid := range podParams {
+			if _, exists := a.agentStates[uid]; !exists {
+				a.agentStates[uid] = NewPodAgentState(uid, a.config.AgentMemorySize)
+			}
+		}
+		a.mu.Unlock()
+
+		// Let agents compute their own bids
+		agentBids := make([]AgentBid, 0, len(podParams))
+		for uid, params := range podParams {
+			pod, exists := podMap[uid]
+			if !exists {
+				continue
+			}
+
+			agentState := a.agentStates[uid]
+			throttling := demands[uid]
+			if throttling < 0 {
+				throttling = 0
+			}
+			if throttling > 1 {
+				throttling = 1
+			}
+
+			// Create utility params for bid computation
+			var p99Latency float64
+			if a.latencyQuerier != nil {
+				_, p99Latency, _ = a.latencyQuerier.QueryPodLatency(a.ctx, pod.Namespace, pod.Name)
+			}
+			targetLatencyMs := a.config.SLOTargetLatencyMs
+			if pod.Annotations != nil {
+				if targetLatencyStr, ok := pod.Annotations["mbcas.io/target-latency-ms"]; ok {
+					if parsed, err := strconv.ParseFloat(targetLatencyStr, 64); err == nil {
+						targetLatencyMs = parsed
+					}
+				}
+			}
+
+			utilParams := allocation.NewUtilityParamsFromPodParams(
+				params,
+				targetLatencyMs,
+				p99Latency,
+				shadowPriceCPU,
+				throttling,
+			)
+			utilParams.SetAllocation(params.ActualUsageMilli)
+
+			// Agent computes its bid
+			currentAlloc := a.getCurrentAllocationMilli(uid)
+			if currentAlloc == 0 {
+				currentAlloc = params.MinMilli
+			}
+			bid := agentState.ComputeBid(shadowPriceCPU, utilParams, currentAlloc, throttling)
+			agentBids = append(agentBids, bid)
+
+			// CRITICAL FIX: DO NOT overwrite params.ActualUsageMilli here if it would
+			// cause a feedback loop. AggregateBids will handle this if needed,
+			// but we want to keep the "true" usage (or its stable estimate) for Nash.
+			// params.ActualUsageMilli = bid.Demand
+			// podParams[uid] = params
+		}
+
+		// Agents observe market conditions
+		avgPrice := shadowPriceCPU
+		if len(agentBids) > 0 {
+			// Compute average price from bids (simplified)
+			avgPrice = shadowPriceCPU
+		}
+		for _, bid := range agentBids {
+			agentState := a.agentStates[bid.UID]
+			priceHistory := []float64{shadowPriceCPU} // Simplified: just current price
+			agentState.ObserveMarket(shadowPriceCPU, avgPrice, priceHistory)
+		}
+	}
+
 	// Convert PodParams to UtilityParams
 	utilityParams := make(map[types.UID]*allocation.UtilityParams)
 	for uid, p := range podParams {
@@ -1047,7 +1181,7 @@ func (a *Agent) computeAllocations(
 	if coalitionAnnotation == "" {
 		coalitionAnnotation = "mbcas.io/coalition"
 	}
-	
+
 	for uid, pod := range podMap {
 		coalitionID := "default" // Default coalition (no grouping)
 		if pod.Annotations != nil {
@@ -1057,13 +1191,13 @@ func (a *Agent) computeAllocations(
 		}
 		coalitionGroups[coalitionID] = append(coalitionGroups[coalitionID], uid)
 	}
-	
+
 	// If all pods are in "default" coalition, skip coalition optimization
 	useCoalitions := false
 	if len(coalitionGroups) > 1 || (len(coalitionGroups) == 1 && coalitionGroups["default"] == nil) {
 		useCoalitions = true
 	}
-	
+
 	// Select allocation mechanism based on config
 	var allocations map[types.UID]int64
 	var needsMap map[types.UID]int64 // Track needs for mode determination
@@ -1071,27 +1205,27 @@ func (a *Agent) computeAllocations(
 	if mechanism == "" {
 		mechanism = "nash" // Default
 	}
-	
+
 	// If using coalitions, compute joint allocation per coalition
 	if useCoalitions && mechanism == "nash" {
 		allocations = make(map[types.UID]int64)
 		needsMap = make(map[types.UID]int64)
-		
+
 		// Allocate capacity to each coalition, then distribute within coalition
 		for _, coalitionPods := range coalitionGroups {
 			if len(coalitionPods) == 0 {
 				continue
 			}
-			
+
 			// Build coalition-level PodParams (aggregate demands)
 			coalitionParams := make(map[types.UID]allocation.PodParams)
 			coalitionTotalNeed := int64(0)
 			coalitionTotalMin := int64(0)
-			
+
 			for _, uid := range coalitionPods {
 				if p, ok := podParams[uid]; ok {
 					coalitionParams[uid] = p
-					need := p.ActualUsageMilli + int64(float64(p.ActualUsageMilli)*0.15)
+					need := int64(float64(p.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
 					if need < p.MinMilli {
 						need = p.MinMilli
 					}
@@ -1102,12 +1236,12 @@ func (a *Agent) computeAllocations(
 					coalitionTotalMin += p.MinMilli
 				}
 			}
-			
+
 			// Allocate capacity proportionally to coalition size/need
 			// Simple approach: allocate based on total need ratio
 			totalSystemNeed := int64(0)
 			for _, p := range podParams {
-				need := p.ActualUsageMilli + int64(float64(p.ActualUsageMilli)*0.15)
+				need := int64(float64(p.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
 				if need < p.MinMilli {
 					need = p.MinMilli
 				}
@@ -1116,17 +1250,17 @@ func (a *Agent) computeAllocations(
 				}
 				totalSystemNeed += need
 			}
-			
+
 			var coalitionCapacity int64
 			if totalSystemNeed > 0 {
 				coalitionCapacity = int64(float64(availableMilli) * float64(coalitionTotalNeed) / float64(totalSystemNeed))
 			} else {
 				coalitionCapacity = availableMilli / int64(len(coalitionGroups))
 			}
-			
+
 			// Run Nash/Kalai-Smorodinsky on coalition
 			coalitionAllocs := allocation.ClearMarketNash(coalitionCapacity, coalitionParams)
-			
+
 			// Distribute coalition allocation to pods
 			for uid, alloc := range coalitionAllocs.Allocations {
 				allocations[uid] = alloc
@@ -1148,10 +1282,10 @@ func (a *Agent) computeAllocations(
 			// Use distributed primal-dual price-clearing
 			// Initialize allocations for utility calculation
 			for uid, util := range utilityParams {
-			currentAlloc := a.getCurrentAllocationMilli(uid)
-			if currentAlloc == 0 {
-				currentAlloc = util.BaselineCPU
-			}
+				currentAlloc := a.getCurrentAllocationMilli(uid)
+				if currentAlloc == 0 {
+					currentAlloc = util.BaselineCPU
+				}
 				util.SetAllocation(currentAlloc)
 			}
 
@@ -1164,10 +1298,10 @@ func (a *Agent) computeAllocations(
 				initialLambda = 0.0
 			}
 			coordinator := allocation.NewPrimalDualCoordinator(
-				0.1,   // eta: step size
+				0.1, // eta: step size
 				initialLambda,
-				0.01,  // tolerance
-				50,    // max iterations (faster than Nash)
+				0.01, // tolerance
+				50,   // max iterations (faster than Nash)
 			)
 
 			// Run primal-dual price-clearing
@@ -1177,9 +1311,9 @@ func (a *Agent) computeAllocations(
 			// Compute needs from utility params (for mode determination)
 			needsMap = make(map[types.UID]int64)
 			for uid, util := range utilityParams {
-				// Use actual usage + 15% headroom as need estimate
-				if podParam, ok := podParams[uid]; ok && podParam.ActualUsageMilli > 0 {
-					need := podParam.ActualUsageMilli + int64(float64(podParam.ActualUsageMilli)*0.15)
+				// Use actual usage + headroom as need estimate
+				if podParam, ok := podParams[uid]; ok && (podParam.ActualUsageMilli > 0 || a.podSampled[uid]) {
+					need := int64(float64(podParam.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
 					if need < util.BaselineCPU {
 						need = util.BaselineCPU
 					}
@@ -1207,27 +1341,27 @@ func (a *Agent) computeAllocations(
 			// Convert UtilityParams to NashBargainingParams
 			nashAgents := make([]allocation.NashBargainingParams, 0, len(utilityParams))
 			for uid, util := range utilityParams {
-			// Use current allocation as demand estimate (or min if no current allocation)
-			currentAlloc := a.getCurrentAllocationMilli(uid)
-			if currentAlloc == 0 {
-				currentAlloc = util.BaselineCPU
-			}
-			util.SetAllocation(currentAlloc)
+				// Use current allocation as demand estimate (or min if no current allocation)
+				currentAlloc := a.getCurrentAllocationMilli(uid)
+				if currentAlloc == 0 {
+					currentAlloc = util.BaselineCPU
+				}
+				util.SetAllocation(currentAlloc)
 
-			nashParams := util.ToNashBargainingParams(string(uid))
-			// Update Demand field with actual need estimate from podParams
-			if podParam, ok := podParams[uid]; ok && podParam.ActualUsageMilli > 0 {
-				// Use actual usage + 15% headroom as demand estimate
-				nashParams.Demand = podParam.ActualUsageMilli + int64(float64(podParam.ActualUsageMilli)*0.15)
-				if nashParams.Demand < nashParams.Baseline {
+				nashParams := util.ToNashBargainingParams(string(uid))
+				// Update Demand field with actual need estimate from podParams
+				if podParam, ok := podParams[uid]; ok && (podParam.ActualUsageMilli > 0 || a.podSampled[uid]) {
+					// Use actual usage + headroom as demand estimate
+					nashParams.Demand = int64(float64(podParam.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
+					if nashParams.Demand < nashParams.Baseline {
+						nashParams.Demand = nashParams.Baseline
+					}
+					if nashParams.Demand > nashParams.MaxAlloc {
+						nashParams.Demand = nashParams.MaxAlloc
+					}
+				} else {
 					nashParams.Demand = nashParams.Baseline
 				}
-				if nashParams.Demand > nashParams.MaxAlloc {
-					nashParams.Demand = nashParams.MaxAlloc
-				}
-			} else {
-				nashParams.Demand = nashParams.Baseline
-			}
 				nashAgents = append(nashAgents, nashParams)
 			}
 
@@ -1247,7 +1381,7 @@ func (a *Agent) computeAllocations(
 	contentionAdjustedAllocations := make(map[types.UID]int64)
 	totalThrottledDemand := 0.0
 	highPriorityThrottled := false
-	
+
 	// Detect contention: if any high-priority pods (Guaranteed QoS or high PriorityClass) are throttled
 	for uid, alloc := range allocations {
 		pod, exists := podMap[uid]
@@ -1255,11 +1389,11 @@ func (a *Agent) computeAllocations(
 			contentionAdjustedAllocations[uid] = alloc
 			continue
 		}
-		
+
 		demand := demands[uid]
 		if demand > 0.3 { // Throttling threshold
 			totalThrottledDemand += demand
-			
+
 			// Check if high-priority pod is throttled (Guaranteed QoS = high priority)
 			if pod.Status.QOSClass == corev1.PodQOSGuaranteed {
 				highPriorityThrottled = true
@@ -1277,7 +1411,7 @@ func (a *Agent) computeAllocations(
 			if !exists {
 				continue
 			}
-			
+
 			// Reclaim from BestEffort/Burstable pods (QoS-based, not name-based)
 			if pod.Status.QOSClass == corev1.PodQOSBestEffort || pod.Status.QOSClass == corev1.PodQOSBurstable {
 				// Get minimum from annotation, or use default reclaimable minimum
@@ -1297,7 +1431,7 @@ func (a *Agent) computeAllocations(
 
 	// Apply Lyapunov-bounded updates for stability with congestion-aware scaling
 	stableAllocations := make(map[types.UID]int64)
-	
+
 	// Compute congestion factor from allocations and params
 	// Convert UtilityParams to AllocationParams for congestion calculation
 	congestionParams := make(map[types.UID]mbcastypes.AllocationParams)
@@ -1307,11 +1441,11 @@ func (a *Agent) computeAllocations(
 			Baseline: util.BaselineCPU,
 			MaxAlloc: util.MaxCPU,
 			Weight:   util.SLOWeight, // Use SLOWeight as bargaining weight
-			SLOGap:   0,               // SLOGap not directly available, use 0
+			SLOGap:   0,              // SLOGap not directly available, use 0
 		}
 	}
 	congestionFactor := stability.ComputeCongestionFactor(contentionAdjustedAllocations, congestionParams)
-	
+
 	for uid, desiredAlloc := range contentionAdjustedAllocations {
 		currentAlloc := a.getCurrentAllocationMilli(uid)
 		if currentAlloc == 0 {
@@ -1401,6 +1535,84 @@ func (a *Agent) computeAllocations(
 		}
 	}
 
+	// Agent-based modeling: update agent states with outcomes and trigger learning
+	if a.config.EnableAgentBasedModeling && a.ql != nil {
+		// Compute average payoff for strategy evolution
+		avgPayoff := ComputeAveragePayoff(a.agentStates)
+
+		// Update each agent with outcome
+		for uid, allocMilli := range stableAllocations {
+			agentState, exists := a.agentStates[uid]
+			if !exists {
+				continue
+			}
+
+			// Get outcome metrics
+			throttling := demands[uid]
+			if throttling < 0 {
+				throttling = 0
+			}
+			if throttling > 1 {
+				throttling = 1
+			}
+
+			// Check SLO violation
+			sloViolation := false
+			if util, ok := utilityParams[uid]; ok {
+				if util.TargetLatencyMs > 0 && util.CurrentLatencyMs > util.TargetLatencyMs {
+					sloViolation = true
+				}
+			}
+
+			// Get utility
+			utility := 0.0
+			if util, ok := utilityParams[uid]; ok {
+				utility = util.Utility()
+			}
+
+			// Get strategy from agent state
+			strategy := agentState.GetStrategyName()
+
+			// Create outcome
+			outcome := DecisionOutcome{
+				Timestamp:    time.Now(),
+				Allocation:   allocMilli,
+				Demand:       podParams[uid].ActualUsageMilli,
+				ShadowPrice:  shadowPriceCPU,
+				Utility:      utility,
+				SLOViolation: sloViolation,
+				Throttling:   throttling,
+				Strategy:     strategy,
+			}
+
+			// Record outcome
+			agentState.RecordOutcome(outcome)
+
+			// Compute reward for Q-learning
+			reward := ComputeReward(outcome, 0.001) // costWeight = 0.001
+
+			// Get state and action for Q-learning
+			currentAlloc := a.getCurrentAllocationMilli(uid)
+			if currentAlloc == 0 {
+				currentAlloc = podParams[uid].MinMilli
+			}
+			stateStr := EncodeState(currentAlloc, throttling, shadowPriceCPU)
+			nextStateStr := EncodeState(allocMilli, throttling, shadowPriceCPU)
+
+			// Update Q-value
+			a.ql.UpdateQValue(agentState, stateStr, strategy, reward, nextStateStr)
+
+			// Evolve strategy based on performance
+			ownPayoff := utility
+			agentState.EvolveStrategy(ownPayoff, avgPayoff, a.config.AgentLearningRate)
+
+			// Decay exploration rate over time
+			if a.ql.GetExplorationRate() > 0.01 {
+				a.ql.DecayExplorationRate(0.999) // Very slow decay
+			}
+		}
+	}
+
 	// Coalition formation and Shapley values (optional, disabled by default)
 	// TODO: When tracing system is available:
 	// 1. Query traces for request paths (e.g., from Jaeger/Zipkin/OpenTelemetry)
@@ -1415,8 +1627,8 @@ func (a *Agent) computeAllocations(
 		// For now, record zero metrics to indicate feature is disabled
 		RecordCoalitionMetrics(0, nil)
 	} else {
-		// Feature disabled - record zero metrics
-		RecordCoalitionMetrics(0, nil)
+		// Feature disabled - don't record misleading zero metrics
+		// Just skip coalition metrics entirely
 	}
 
 	return result, limitAllocations, requestAllocations, podParams
@@ -1504,7 +1716,7 @@ func getMinCPUFromAnnotation(pod *corev1.Pod, defaultVal int64) int64 {
 	if !ok {
 		return defaultVal
 	}
-	
+
 	// Parse as Kubernetes quantity (supports "100m", "1", "0.5", etc.)
 	qty, err := resource.ParseQuantity(annVal)
 	if err != nil {
@@ -1515,7 +1727,7 @@ func getMinCPUFromAnnotation(pod *corev1.Pod, defaultVal int64) int64 {
 			"error", err)
 		return defaultVal
 	}
-	
+
 	return qty.MilliValue()
 }
 

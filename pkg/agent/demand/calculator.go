@@ -13,6 +13,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"mbcas/pkg/allocation"
+	"mbcas/pkg/price"
 )
 
 // Calculator handles demand calculation and market parameter extraction.
@@ -157,6 +158,74 @@ func (c *Calculator) ParamsForPodWithUsage(
 	params := c.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
 	// Add actual usage
 	params.ActualUsageMilli = actualUsageMilli
+	return params
+}
+
+// ParamsForPodWithPrice extracts market parameters and applies price-responsive demand adjustment.
+// This implements price-taking behavior: agents adjust demand based on shadow prices.
+// shadowPrice: current CPU shadow price (0 if not available)
+// enablePriceResponse: whether to apply price response (if false, behaves like ParamsForPodWithUsage)
+// elasticity: how responsive to price changes [0, 1] (default 0.5 if <= 0)
+func (c *Calculator) ParamsForPodWithPrice(
+	pod *corev1.Pod,
+	demand float64,
+	actualUsageMilli int64,
+	baselineMilli int64,
+	nodeCapMilli int64,
+	shadowPrice float64,
+	enablePriceResponse bool,
+	elasticity float64,
+) allocation.PodParams {
+	// Get base params with usage
+	params := c.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
+
+	// Apply price response if enabled and price is available
+	if enablePriceResponse && shadowPrice > 0 && actualUsageMilli > 0 {
+		// Compute marginal utility for price response
+		// Use a simplified marginal utility: weight * (1 + throttling_pressure) - price
+		// This approximates the marginal utility without full utility computation
+		throttlingPressure := demand
+		if throttlingPressure < 0 {
+			throttlingPressure = 0
+		}
+		if throttlingPressure > 1 {
+			throttlingPressure = 1
+		}
+		marginalUtility := params.Weight * (1.0 + throttlingPressure)
+
+		// Default elasticity if not provided
+		if elasticity <= 0 {
+			elasticity = 0.5 // Moderate responsiveness
+		}
+
+		// Apply price response: adjust demand based on price
+		adjustedDemandMilli := price.DemandResponse(
+			actualUsageMilli,
+			shadowPrice,
+			marginalUtility,
+			elasticity,
+		)
+
+		// Convert adjusted demand back to normalized [0,1] if needed
+		// For now, we'll use the adjusted demand in millicores directly
+		// The allocation algorithm will use actualUsageMilli, so we update that
+		// But we also want to preserve the demand signal for other uses
+		// So we'll store the price-adjusted usage as a hint
+		if adjustedDemandMilli != actualUsageMilli {
+			klog.V(5).InfoS("Price response adjusted demand",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"originalUsage", actualUsageMilli,
+				"adjustedDemand", adjustedDemandMilli,
+				"shadowPrice", shadowPrice,
+				"marginalUtility", marginalUtility)
+		}
+
+		// Update actual usage to reflect price-adjusted demand
+		// This will be used in need/want calculations
+		params.ActualUsageMilli = adjustedDemandMilli
+	}
+
 	return params
 }
 

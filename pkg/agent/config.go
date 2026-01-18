@@ -80,6 +80,58 @@ type AgentConfig struct {
 	// CoalitionGroupingAnnotation is the annotation key for coalition grouping.
 	// Pods with the same annotation value are grouped for joint optimization.
 	CoalitionGroupingAnnotation string
+
+	// EnablePriceResponse enables price-responsive demand adjustment.
+	// When true, agents adjust demand based on shadow prices (price-taking behavior).
+	// High prices cause agents to reduce demand, low prices allow increased demand.
+	EnablePriceResponse bool
+
+	// EnableAgentBasedModeling enables agent-based modeling features.
+	// When true, pods act as autonomous agents with learning and adaptation.
+	EnableAgentBasedModeling bool
+
+	// AgentLearningRate controls how quickly agents adapt (0.01-0.5).
+	// Higher values mean faster adaptation but potentially more instability.
+	AgentLearningRate float64
+
+	// AgentMemorySize is the number of past decisions to remember.
+	// Used for learning from history and strategy evolution.
+	AgentMemorySize int
+
+	// AgentExplorationRate is the initial exploration rate for Q-learning (0.0-1.0).
+	// Higher values mean more exploration (trying different strategies).
+	AgentExplorationRate float64
+
+	// AgentDiscountFactor is the discount factor for Q-learning (0.0-1.0).
+	// Controls importance of future rewards vs immediate rewards.
+	AgentDiscountFactor float64
+
+	// MaxCoalitionSize limits the number of members in a single coalition.
+	// Prevents O(2^n) explosion in coalition stability checks.
+	MaxCoalitionSize int
+
+	// MaxHistorySize is the maximum number of decision outcomes to remember per pod.
+	// Used for learning from history and strategy evolution.
+	MaxHistorySize int
+
+	// MinUsageMicroseconds is the minimum CPU usage in microseconds for valid demand samples.
+	// Samples below this threshold are considered invalid.
+	MinUsageMicroseconds int64
+
+	// AbsoluteMinAllocation is the minimum CPU allocation per pod in millicores.
+	// Prevents allocations from going below this threshold.
+	AbsoluteMinAllocation int64
+
+	// NeedHeadroomFactor is the conservative headroom for actual need (default 15%).
+	// This is what the pod truly requires to avoid throttling.
+	NeedHeadroomFactor float64
+
+	// WantHeadroomFactor is the base headroom for want calculation (default 10%).
+	WantHeadroomFactor float64
+
+	// MaxDemandMultiplier controls aggressive scaling in want (default 4.0x max growth).
+	// Used when pod signals it would like more resources.
+	MaxDemandMultiplier float64
 }
 
 // DefaultConfig returns a configuration with default values.
@@ -90,7 +142,7 @@ func DefaultConfig() *AgentConfig {
 		MinChangePercent:       2.0,
 		SystemReservePercent:   10.0,
 		BaselineCPUPerPod:      "100m",
-		StartupGracePeriod:     45 * time.Second,
+		StartupGracePeriod:     90 * time.Second,
 		SLOTargetLatencyMs:     0, // Disabled by default
 		PrometheusURL:          "", // Empty = disabled
 		FastLoopInterval:       2 * time.Second,
@@ -102,7 +154,20 @@ func DefaultConfig() *AgentConfig {
 		AllocationMechanism:        "nash",
 		EnableKalmanPrediction:     true,  // Enabled by default
 		EnableBatchReconciliation:  true,  // Enabled by default
+		EnablePriceResponse:         true,  // Enabled by default
+		EnableAgentBasedModeling:    true,  // Enabled by default
+		AgentLearningRate:          0.1,   // Moderate learning rate
+		AgentMemorySize:             20,    // Remember last 20 decisions
+		AgentExplorationRate:        0.2,   // 20% exploration initially
+		AgentDiscountFactor:         0.9,   // Value future rewards
 		CoalitionGroupingAnnotation: "mbcas.io/coalition",
+		MaxCoalitionSize:            8,     // Limit coalition size to prevent O(2^n) explosion
+		MaxHistorySize:              1000,  // Maximum decision history per pod
+		MinUsageMicroseconds:       1000,  // 1ms minimum usage for valid samples
+		AbsoluteMinAllocation:      10,    // Minimum allocation in millicores
+		NeedHeadroomFactor:          0.15,  // 15% conservative headroom
+		WantHeadroomFactor:          0.10,  // 10% base headroom
+		MaxDemandMultiplier:         4.0,   // 4x max growth for want calculation
 	}
 }
 
@@ -293,6 +358,60 @@ func (c *AgentConfig) loadFromConfigMap(cm *corev1.ConfigMap) error {
 		c.CoalitionGroupingAnnotation = val
 	}
 
+	// Parse EnablePriceResponse
+	if val, ok := data["enablePriceResponse"]; ok && val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid enablePriceResponse: %w", err)
+		}
+		c.EnablePriceResponse = b
+	}
+
+	// Parse EnableAgentBasedModeling
+	if val, ok := data["enableAgentBasedModeling"]; ok && val != "" {
+		b, err := strconv.ParseBool(val)
+		if err != nil {
+			return fmt.Errorf("invalid enableAgentBasedModeling: %w", err)
+		}
+		c.EnableAgentBasedModeling = b
+	}
+
+	// Parse AgentLearningRate
+	if val, ok := data["agentLearningRate"]; ok && val != "" {
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return fmt.Errorf("invalid agentLearningRate: %w", err)
+		}
+		c.AgentLearningRate = f
+	}
+
+	// Parse AgentMemorySize
+	if val, ok := data["agentMemorySize"]; ok && val != "" {
+		i, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid agentMemorySize: %w", err)
+		}
+		c.AgentMemorySize = i
+	}
+
+	// Parse AgentExplorationRate
+	if val, ok := data["agentExplorationRate"]; ok && val != "" {
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return fmt.Errorf("invalid agentExplorationRate: %w", err)
+		}
+		c.AgentExplorationRate = f
+	}
+
+	// Parse AgentDiscountFactor
+	if val, ok := data["agentDiscountFactor"]; ok && val != "" {
+		f, err := strconv.ParseFloat(val, 64)
+		if err != nil {
+			return fmt.Errorf("invalid agentDiscountFactor: %w", err)
+		}
+		c.AgentDiscountFactor = f
+	}
+
 	return nil
 }
 
@@ -432,7 +551,110 @@ func (c *AgentConfig) loadFromEnvironment() {
 	// MBCAS_COALITION_GROUPING_ANNOTATION
 	if val := os.Getenv("MBCAS_COALITION_GROUPING_ANNOTATION"); val != "" {
 		c.CoalitionGroupingAnnotation = val
-		klog.V(2).InfoS("Loaded CoalitionGroupingAnnotation from environment", "value", c.CoalitionGroupingAnnotation)
+	}
+
+	// MBCAS_ENABLE_PRICE_RESPONSE
+	if val := os.Getenv("MBCAS_ENABLE_PRICE_RESPONSE"); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			c.EnablePriceResponse = b
+			klog.V(2).InfoS("Loaded EnablePriceResponse from environment", "value", c.EnablePriceResponse)
+		}
+	}
+
+	// MBCAS_ENABLE_AGENT_BASED_MODELING
+	if val := os.Getenv("MBCAS_ENABLE_AGENT_BASED_MODELING"); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			c.EnableAgentBasedModeling = b
+			klog.V(2).InfoS("Loaded EnableAgentBasedModeling from environment", "value", c.EnableAgentBasedModeling)
+		}
+	}
+
+	// MBCAS_AGENT_LEARNING_RATE
+	if val := os.Getenv("MBCAS_AGENT_LEARNING_RATE"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.AgentLearningRate = f
+			klog.V(2).InfoS("Loaded AgentLearningRate from environment", "value", c.AgentLearningRate)
+		}
+	}
+
+	// MBCAS_AGENT_MEMORY_SIZE
+	if val := os.Getenv("MBCAS_AGENT_MEMORY_SIZE"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			c.AgentMemorySize = i
+			klog.V(2).InfoS("Loaded AgentMemorySize from environment", "value", c.AgentMemorySize)
+		}
+	}
+
+	// MBCAS_AGENT_EXPLORATION_RATE
+	if val := os.Getenv("MBCAS_AGENT_EXPLORATION_RATE"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.AgentExplorationRate = f
+			klog.V(2).InfoS("Loaded AgentExplorationRate from environment", "value", c.AgentExplorationRate)
+		}
+	}
+
+	// MBCAS_AGENT_DISCOUNT_FACTOR
+	if val := os.Getenv("MBCAS_AGENT_DISCOUNT_FACTOR"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.AgentDiscountFactor = f
+			klog.V(2).InfoS("Loaded AgentDiscountFactor from environment", "value", c.AgentDiscountFactor)
+		}
+	}
+
+	// MBCAS_MAX_COALITION_SIZE
+	if val := os.Getenv("MBCAS_MAX_COALITION_SIZE"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			c.MaxCoalitionSize = i
+			klog.V(2).InfoS("Loaded MaxCoalitionSize from environment", "value", c.MaxCoalitionSize)
+		}
+	}
+
+	// MBCAS_MAX_HISTORY_SIZE
+	if val := os.Getenv("MBCAS_MAX_HISTORY_SIZE"); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			c.MaxHistorySize = i
+			klog.V(2).InfoS("Loaded MaxHistorySize from environment", "value", c.MaxHistorySize)
+		}
+	}
+
+	// MBCAS_MIN_USAGE_MICROSECONDS
+	if val := os.Getenv("MBCAS_MIN_USAGE_MICROSECONDS"); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			c.MinUsageMicroseconds = i
+			klog.V(2).InfoS("Loaded MinUsageMicroseconds from environment", "value", c.MinUsageMicroseconds)
+		}
+	}
+
+	// MBCAS_ABSOLUTE_MIN_ALLOCATION
+	if val := os.Getenv("MBCAS_ABSOLUTE_MIN_ALLOCATION"); val != "" {
+		if i, err := strconv.ParseInt(val, 10, 64); err == nil {
+			c.AbsoluteMinAllocation = i
+			klog.V(2).InfoS("Loaded AbsoluteMinAllocation from environment", "value", c.AbsoluteMinAllocation)
+		}
+	}
+
+	// MBCAS_NEED_HEADROOM_FACTOR
+	if val := os.Getenv("MBCAS_NEED_HEADROOM_FACTOR"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.NeedHeadroomFactor = f
+			klog.V(2).InfoS("Loaded NeedHeadroomFactor from environment", "value", c.NeedHeadroomFactor)
+		}
+	}
+
+	// MBCAS_WANT_HEADROOM_FACTOR
+	if val := os.Getenv("MBCAS_WANT_HEADROOM_FACTOR"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.WantHeadroomFactor = f
+			klog.V(2).InfoS("Loaded WantHeadroomFactor from environment", "value", c.WantHeadroomFactor)
+		}
+	}
+
+	// MBCAS_MAX_DEMAND_MULTIPLIER
+	if val := os.Getenv("MBCAS_MAX_DEMAND_MULTIPLIER"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			c.MaxDemandMultiplier = f
+			klog.V(2).InfoS("Loaded MaxDemandMultiplier from environment", "value", c.MaxDemandMultiplier)
+		}
 	}
 }
 
@@ -508,6 +730,12 @@ func (c *AgentConfig) Log() {
 		"fastStepSizeMax", c.FastStepSizeMax,
 		"allocationMechanism", c.AllocationMechanism,
 		"enableKalmanPrediction", c.EnableKalmanPrediction,
+		"enablePriceResponse", c.EnablePriceResponse,
+		"enableAgentBasedModeling", c.EnableAgentBasedModeling,
+		"agentLearningRate", c.AgentLearningRate,
+		"agentMemorySize", c.AgentMemorySize,
+		"agentExplorationRate", c.AgentExplorationRate,
+		"agentDiscountFactor", c.AgentDiscountFactor,
 		"enableBatchReconciliation", c.EnableBatchReconciliation,
 		"coalitionGroupingAnnotation", c.CoalitionGroupingAnnotation)
 }

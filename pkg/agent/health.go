@@ -144,6 +144,12 @@ func (h *HealthServer) Start(port int) {
 	})
 
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		status := h.GetStatus()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(status)
+	})
 	mux.Handle("/", NewDashboardHandler(h.agent))
 
 	addr := fmt.Sprintf(":%d", port)

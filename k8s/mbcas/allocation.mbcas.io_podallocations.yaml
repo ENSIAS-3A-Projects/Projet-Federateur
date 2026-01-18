@@ -14,130 +14,141 @@ spec:
     singular: podallocation
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - jsonPath: .spec.namespace
-      name: Namespace
-      type: string
-    - jsonPath: .spec.podName
-      name: Pod
-      type: string
-    - jsonPath: .spec.desiredCPURequest
-      name: Desired Request
-      type: string
-    - jsonPath: .spec.desiredCPULimit
-      name: Desired Limit
-      type: string
-    - jsonPath: .status.appliedCPURequest
-      name: Applied Request
-      type: string
-    - jsonPath: .status.appliedCPULimit
-      name: Applied Limit
-      type: string
-    - jsonPath: .status.phase
-      name: Status
-      type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1alpha1
-    schema:
-      openAPIV3Schema:
-        description: |-
-          PodAllocation is the Schema for the podallocations API.
-          It represents a single authoritative control object for CPU allocation decisions.
+    - additionalPrinterColumns:
+        - jsonPath: .spec.namespace
+          name: Namespace
+          type: string
+        - jsonPath: .spec.podName
+          name: Pod
+          type: string
+        - jsonPath: .spec.desiredCPURequest
+          name: Desired Request
+          type: string
+        - jsonPath: .spec.desiredCPULimit
+          name: Desired Limit
+          type: string
+        - jsonPath: .status.appliedCPURequest
+          name: Applied Request
+          type: string
+        - jsonPath: .status.appliedCPULimit
+          name: Applied Limit
+          type: string
+        - jsonPath: .status.phase
+          name: Status
+          type: string
+        - jsonPath: .metadata.creationTimestamp
+          name: Age
+          type: date
+      name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |-
+            PodAllocation is the Schema for the podallocations API.
+            It represents a single authoritative control object for CPU allocation decisions.
 
-          The PodAllocation is Namespaced (not Cluster-scoped) to:
-            - Align with Pod lifecycle (pods are namespaced)
-            - Avoid RBAC complexity
-            - Prevent cross-tenant leakage
-        properties:
-          apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
-            type: string
-          kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
-            type: string
-          metadata:
-            type: object
-          spec:
-            description: PodAllocationSpec defines the desired state of PodAllocation.
-            properties:
-              desiredCPULimit:
-                description: |-
-                  DesiredCPULimit is the desired CPU limit for the pod.
-                  This is a Kubernetes resource quantity string (e.g., "500m", "1", "2.5").
-                  Limit should be set slightly above request for burst headroom.
-                type: string
-              desiredCPURequest:
-                description: |-
-                  DesiredCPURequest is the desired CPU request for the pod.
-                  This is a Kubernetes resource quantity string (e.g., "100m", "500m").
-                  Request should be set slightly above actual usage for scheduling efficiency.
-                type: string
-              namespace:
-                description: Namespace is the namespace of the target pod.
-                type: string
-              podName:
-                description: PodName is the name of the target pod.
-                type: string
-            required:
-            - desiredCPULimit
-            - desiredCPURequest
-            - namespace
-            - podName
-            type: object
-          status:
-            description: PodAllocationStatus defines the observed state of PodAllocation.
-            properties:
-              appliedCPULimit:
-                description: |-
-                  AppliedCPULimit is the CPU limit that was last successfully applied to the pod.
-                  This may differ from desiredCPULimit if the application is in progress or failed.
-                type: string
-              appliedCPURequest:
-                description: AppliedCPURequest is the CPU request that was last successfully
-                  applied to the pod.
-                type: string
-              lastAppliedTime:
-                description: LastAppliedTime is the timestamp when the CPU resources
-                  were last successfully applied.
-                format: date-time
-                type: string
-              lastAttemptTime:
-                description: LastAttemptTime is the timestamp of the last attempt
-                  to apply the CPU resources.
-                format: date-time
-                type: string
-              phase:
-                description: |-
-                  Phase represents the current phase of the allocation.
-                  Possible values: Pending, Applied, Failed
+            The PodAllocation is Namespaced (not Cluster-scoped) to:
+              - Align with Pod lifecycle (pods are namespaced)
+              - Avoid RBAC complexity
+              - Prevent cross-tenant leakage
+          properties:
+            apiVersion:
+              description: |-
+                APIVersion defines the versioned schema of this representation of an object.
+                Servers should convert recognized schemas to the latest internal value, and
+                may reject unrecognized values.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+              type: string
+            kind:
+              description: |-
+                Kind is a string value representing the REST resource this object represents.
+                Servers may infer this from the endpoint the client submits requests to.
+                Cannot be updated.
+                In CamelCase.
+                More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: PodAllocationSpec defines the desired state of PodAllocation.
+              properties:
+                desiredCPULimit:
+                  description: |-
+                    DesiredCPULimit is the desired CPU limit for the pod.
+                    This is a Kubernetes resource quantity string (e.g., "500m", "1", "2.5").
+                    Limit should be set slightly above request for burst headroom.
+                  type: string
+                desiredCPURequest:
+                  description: |-
+                    DesiredCPURequest is the desired CPU request for the pod.
+                    This is a Kubernetes resource quantity string (e.g., "100m", "500m").
+                    Request should be set slightly above actual usage for scheduling efficiency.
+                  type: string
+                namespace:
+                  description: Namespace is the namespace of the target pod.
+                  type: string
+                podName:
+                  description: PodName is the name of the target pod.
+                  type: string
+              required:
+                - desiredCPULimit
+                - desiredCPURequest
+                - namespace
+                - podName
+              type: object
+            status:
+              description: PodAllocationStatus defines the observed state of PodAllocation.
+              properties:
+                appliedCPULimit:
+                  description: |-
+                    AppliedCPULimit is the CPU limit that was last successfully applied to the pod.
+                    This may differ from desiredCPULimit if the application is in progress or failed.
+                  type: string
+                appliedCPURequest:
+                  description:
+                    AppliedCPURequest is the CPU request that was last successfully
+                    applied to the pod.
+                  type: string
+                lastAppliedTime:
+                  description:
+                    LastAppliedTime is the timestamp when the CPU resources
+                    were last successfully applied.
+                  format: date-time
+                  type: string
+                lastAttemptTime:
+                  description:
+                    LastAttemptTime is the timestamp of the last attempt
+                    to apply the CPU resources.
+                  format: date-time
+                  type: string
+                phase:
+                  description: |-
+                    Phase represents the current phase of the allocation.
+                    Possible values: Pending, Applied, Failed
 
-                  Phase invariants (for correctness and evaluation):
-                    - Applied: appliedCPULimit == desiredCPULimit AND appliedCPURequest == desiredCPURequest
-                    - Pending: reconcile in progress (controller is working to apply desired state)
-                    - Failed: controller must retry later (temporary failure, will be retried)
-                enum:
-                - Pending
-                - Applied
-                - Failed
-                type: string
-              reason:
-                description: Reason provides a human-readable reason for the current
-                  phase.
-                type: string
-            type: object
-        type: object
-    served: true
-    storage: true
-    subresources:
-      status: {}
+                    Phase invariants (for correctness and evaluation):
+                      - Applied: appliedCPULimit == desiredCPULimit AND appliedCPURequest == desiredCPURequest
+                      - Pending: reconcile in progress (controller is working to apply desired state)
+                      - Failed: controller must retry later (temporary failure, will be retried)
+                  enum:
+                    - Pending
+                    - Applied
+                    - Failed
+                  type: string
+                reason:
+                  description:
+                    Reason provides a human-readable reason for the current
+                    phase.
+                  type: string
+                shadowPriceCPU:
+                  description: |-
+                    ShadowPriceCPU is the current CPU shadow price (Lagrange multiplier).
+                    Agents can read this to adjust their demand based on market conditions.
+                    Higher prices indicate resource scarcity, causing agents to reduce demand.
+                    Lower prices indicate resource abundance, allowing agents to increase demand.
+                  type: number
+              type: object
+          type: object
+      served: true
+      storage: true
+      subresources:
+        status: {}

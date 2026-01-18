@@ -1,62 +1,23 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: evaluation
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: gateway
-  namespace: evaluation
-spec:
-  selector:
-    app: gateway
-  ports:
-  - port: 80
-    targetPort: 8080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: worker-a
-  namespace: evaluation
-spec:
-  selector:
-    app: worker-a
-  ports:
-  - port: 80
-    targetPort: 8080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: worker-b
-  namespace: evaluation
-spec:
-  selector:
-    app: worker-b
-  ports:
-  - port: 80
-    targetPort: 8080
----
-# Gateway Deployment (Mode B: VPA)
+# MBCAS-managed workloads - labeled for MBCAS management
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gateway
-  namespace: evaluation
+  name: gateway-mbcas
+  namespace: vpa-mbcas-test
   labels:
     app: gateway
+    test: mbcas
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: gateway
+      test: mbcas
   template:
     metadata:
       labels:
         app: gateway
-        # Managed label doesn't affect VPA, but good for consistency
+        test: mbcas
         mbcas.io/managed: "true"
     spec:
       containers:
@@ -66,35 +27,39 @@ spec:
         env:
         - name: ROLE
           value: "gateway"
+        - name: PORT
+          value: "8080"
         - name: TARGET_A_URL
-          value: "http://worker-a"
+          value: "http://worker-a-mbcas:8080"
         - name: TARGET_B_URL
-          value: "http://worker-b"
+          value: "http://worker-b-mbcas:8080"
         resources:
           requests:
-            cpu: "100m"
-            memory: "64Mi"
-          limits:
             cpu: "200m"
             memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
 ---
-# Worker A Deployment (Deterministic)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: worker-a
-  namespace: evaluation
+  name: worker-a-mbcas
+  namespace: vpa-mbcas-test
   labels:
     app: worker-a
+    test: mbcas
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: worker-a
+      test: mbcas
   template:
     metadata:
       labels:
         app: worker-a
+        test: mbcas
         mbcas.io/managed: "true"
     spec:
       containers:
@@ -104,33 +69,37 @@ spec:
         env:
         - name: ROLE
           value: "worker-a"
+        - name: PORT
+          value: "8080"
         - name: CPU_LOAD_MS
           value: "30"
         resources:
           requests:
-            cpu: "500m"
-            memory: "64Mi"
+            cpu: "300m"
+            memory: "128Mi"
           limits:
             cpu: "1000m"
-            memory: "128Mi"
+            memory: "256Mi"
 ---
-# Worker B Deployment (Bursty)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: worker-b
-  namespace: evaluation
+  name: worker-b-mbcas
+  namespace: vpa-mbcas-test
   labels:
     app: worker-b
+    test: mbcas
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: worker-b
+      test: mbcas
   template:
     metadata:
       labels:
         app: worker-b
+        test: mbcas
         mbcas.io/managed: "true"
     spec:
       containers:
@@ -140,38 +109,42 @@ spec:
         env:
         - name: ROLE
           value: "worker-b"
+        - name: PORT
+          value: "8080"
         - name: CPU_LOAD_MS
-          value: "30"
+          value: "20"
         - name: SPIKE_PROB
           value: "0.2"
         - name: SPIKE_MULT
-          value: "5.0"
+          value: "3.0"
         resources:
           requests:
-            cpu: "500m"
-            memory: "64Mi"
+            cpu: "300m"
+            memory: "128Mi"
           limits:
             cpu: "1000m"
-            memory: "128Mi"
+            memory: "256Mi"
 ---
-# Background Noise Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: noise
-  namespace: evaluation
+  name: noise-mbcas
+  namespace: vpa-mbcas-test
   labels:
     app: noise
+    test: mbcas
 spec:
   replicas: 2
   selector:
     matchLabels:
       app: noise
+      test: mbcas
   template:
     metadata:
       labels:
         app: noise
-        mbcas.io/managed: "false"
+        test: mbcas
+        mbcas.io/managed: "true"
     spec:
       containers:
       - name: noise
@@ -180,12 +153,62 @@ spec:
         env:
         - name: ROLE
           value: "noise"
+        - name: PORT
+          value: "8080"
         - name: NOISE_INTENSITY
           value: "0.8"
         resources:
           requests:
-            cpu: "500m"
+            cpu: "200m"
             memory: "64Mi"
           limits:
-            cpu: "1000m"
+            cpu: "500m"
             memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-mbcas
+  namespace: vpa-mbcas-test
+  labels:
+    test: mbcas
+spec:
+  selector:
+    app: gateway
+    test: mbcas
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-a-mbcas
+  namespace: vpa-mbcas-test
+  labels:
+    test: mbcas
+spec:
+  selector:
+    app: worker-a
+    test: mbcas
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-b-mbcas
+  namespace: vpa-mbcas-test
+  labels:
+    test: mbcas
+spec:
+  selector:
+    app: worker-b
+    test: mbcas
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080

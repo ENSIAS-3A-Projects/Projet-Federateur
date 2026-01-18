@@ -9,6 +9,39 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// Prometheus metrics
+var (
+	requestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "HTTP request duration in seconds",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+		},
+		[]string{"handler", "method", "status"},
+	)
+
+	requestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"handler", "method", "status"},
+	)
+
+	cpuBurnDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cpu_burn_duration_seconds",
+			Help:    "CPU burn duration per request",
+			Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1},
+		},
+		[]string{"role"},
+	)
 )
 
 // Configuration
@@ -23,6 +56,35 @@ var (
 	noiseIntensity = getEnvFloat("NOISE_INTENSITY", 0.5) // % of core
 )
 
+// responseWriter wraps http.ResponseWriter to capture status code
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+// instrumentedHandler wraps handlers with Prometheus instrumentation
+func instrumentedHandler(handler string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// Create response writer wrapper to capture status
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+		h(rw, r)
+
+		duration := time.Since(start).Seconds()
+		status := strconv.Itoa(rw.statusCode)
+
+		requestDuration.WithLabelValues(handler, r.Method, status).Observe(duration)
+		requestsTotal.WithLabelValues(handler, r.Method, status).Inc()
+	}
+}
+
 // BurnCPU burns CPU for approximately specified duration
 // This is a busy loop, not sleep!
 func burnCPU(duration time.Duration) {
@@ -31,6 +93,7 @@ func burnCPU(duration time.Duration) {
 		// Busy loop
 		_ = 1 + 1
 	}
+	cpuBurnDuration.WithLabelValues(role).Observe(duration.Seconds())
 }
 
 // NoiseLoop burns CPU continuously to simulate background noise
@@ -48,8 +111,6 @@ func noiseLoop() {
 
 // Gateway Handler: Calls A then B
 func handleGateway(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-
 	// Call Worker A
 	if err := callService(targetA); err != nil {
 		http.Error(w, fmt.Sprintf("Error calling A: %v", err), 500)
@@ -62,9 +123,8 @@ func handleGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	duration := time.Since(start)
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Gateway done in %v", duration)
+	fmt.Fprintf(w, "Gateway done")
 }
 
 // Worker Handler: Burns CPU
@@ -95,17 +155,22 @@ func callService(url string) error {
 func main() {
 	log.Printf("Starting Service. Role: %s, Port: %s", role, port)
 
+	// Prometheus metrics endpoint
+	http.Handle("/metrics", promhttp.Handler())
+
+	// Health endpoint
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "OK")
+	})
+
 	if role == "noise" {
 		go noiseLoop()
-		// Noise pod also exposes health check but main job is background loop
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
 	} else if role == "gateway" {
-		http.HandleFunc("/", handleGateway)
+		http.HandleFunc("/", instrumentedHandler("gateway", handleGateway))
 	} else {
 		// Worker A or B
-		http.HandleFunc("/", handleWorker)
+		http.HandleFunc("/", instrumentedHandler("worker", handleWorker))
 	}
 
 	log.Fatal(http.ListenAndServe(":"+port, nil))

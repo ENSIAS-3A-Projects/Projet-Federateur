@@ -8,7 +8,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: mbcas-agent
-  namespace: mbcas-system  # Changed from 'system'
+  namespace: mbcas-system # Changed from 'system'
   labels:
     app.kubernetes.io/name: mbcas
     app.kubernetes.io/component: agent
@@ -28,49 +28,48 @@ spec:
       hostPID: false
       # Tolerate all taints to run on all nodes
       tolerations:
-      - operator: Exists
-        effect: NoSchedule
-      - operator: Exists
-        effect: NoExecute
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
       containers:
-      - name: agent
-        image: mbcas-agent:latest
-        imagePullPolicy: IfNotPresent
-        command:
-        - /agent
-        - --node-name=$(NODE_NAME)
-        env:
-        - name: NODE_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 100m
-            memory: 128Mi
-        volumeMounts:
-        - name: cgroup
-          mountPath: /sys/fs/cgroup
-          readOnly: true
-        # FIXED: Security context for cgroup access
-        securityContext:
-          # Must run as root to read cgroup stats
-          runAsNonRoot: false
-          runAsUser: 0
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          capabilities:
-            add:
-            - SYS_ADMIN  # Required for cgroup access
-            drop:
-            - NET_RAW
+        - name: agent
+          image: mbcas-agent:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /agent
+            - --node-name=$(NODE_NAME)
+            - --v=4
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+          # FIXED: Security context for cgroup access
+          securityContext:
+            # Must run as root to read cgroup stats
+            runAsNonRoot: false
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+                - SYS_ADMIN # Required for cgroup access
+              drop:
+                - NET_RAW
       volumes:
-      - name: cgroup
-        hostPath:
-          path: /sys/fs/cgroup
-          type: Directory
-
-
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory

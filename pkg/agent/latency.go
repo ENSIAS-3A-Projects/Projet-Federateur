@@ -75,15 +75,16 @@ func (lq *LatencyQuerier) QueryPodLatency(ctx context.Context, namespace, pod st
 	lq.cacheMu.RUnlock()
 
 	// Query Prometheus for p95 latency
-	// Using common HTTP request duration metric pattern
+	// Using flexible query that aggregates by namespace and handler
+	// This works even if pod label doesn't match exactly
 	p95Query := fmt.Sprintf(
-		`histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace="%s",pod="%s"}[1m])) by (le)) * 1000`,
-		namespace, pod,
+		`histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{namespace="%s",handler!=""}[1m]))) * 1000`,
+		namespace,
 	)
 
 	p99Query := fmt.Sprintf(
-		`histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{namespace="%s",pod="%s"}[1m])) by (le)) * 1000`,
-		namespace, pod,
+		`histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{namespace="%s",handler!=""}[1m]))) * 1000`,
+		namespace,
 	)
 
 	// Query p95
@@ -146,6 +147,9 @@ func extractValueFromResult(result model.Value) float64 {
 	}
 	return 0
 }
+
+
+
 
 
 

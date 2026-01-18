@@ -187,14 +187,19 @@ func (fg *FastGuardrail) CheckAndApplyFastUp(pod *corev1.Pod) (bool, error) {
 
 	// Calculate fast-up step size (between min and max)
 	// Use larger step for more severe violations
-	// High-priority pods (Guaranteed QoS or high PriorityClass) get more aggressive fast-up
+	// High-priority pods (PriorityClass or Priority value) get more aggressive fast-up
 	stepSize := fg.config.FastStepSizeMin
 	
-	// Check if pod is high priority (Guaranteed QoS = high priority)
-	isHighPriority := pod.Status.QOSClass == corev1.PodQOSGuaranteed
-	
-	// Also check PriorityClass if available (would need k8sClient, but for now use QoS)
-	// Future: could fetch PriorityClass here if needed
+	// Check if pod is high priority using PriorityClass or Priority value
+	// Note: Controller skips Guaranteed QoS, so we check PriorityClass instead
+	isHighPriority := false
+	if pod.Spec.PriorityClassName != "" {
+		// Pod has explicit priority class - treat as high priority
+		isHighPriority = true
+	} else if pod.Spec.Priority != nil && *pod.Spec.Priority > 0 {
+		// Pod has explicit priority value - treat as high priority
+		isHighPriority = true
+	}
 	
 	if isHighPriority {
 		// High-priority pods: use max step size immediately for faster protection
@@ -245,7 +250,9 @@ func (fg *FastGuardrail) CheckAndApplyFastUp(pod *corev1.Pod) (bool, error) {
 		"newLimit", newLimitMilli,
 		"stepSize", stepSize)
 
-	if err := fg.writer.WritePodAllocation(fg.ctx, pod, newRequestStr, newLimitStr); err != nil {
+	// Fast guardrail doesn't use shadow prices (it's a quick response mechanism)
+	// Pass 0.0 as shadow price - it will be updated in the next slow loop cycle
+	if err := fg.writer.WritePodAllocation(fg.ctx, pod, newRequestStr, newLimitStr, 0.0); err != nil {
 		return false, fmt.Errorf("write fast-up allocation: %w", err)
 	}
 
