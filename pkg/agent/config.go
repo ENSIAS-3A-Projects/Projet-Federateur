@@ -190,8 +190,8 @@ func DefaultConfig() *AgentConfig {
 		CostEfficiencyMode:          false, // Disabled by default, enable via flag/env
 		TargetThrottling:            0.05,  // Target 5% throttling
 		IdleDecayRate:               0.005, // 0.5% decay per tick
-		AlphaDown:                   0.8,   // Aggressive downward adjustment
-		AlphaUp:                     0.1,   // Damped upward adjustment
+		AlphaDown:                   0.9,   // Aggressive downward adjustment for cost efficiency
+		AlphaUp:                     0.4,   // Increased from 0.1 for better responsiveness
 	}
 }
 

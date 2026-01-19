@@ -9,15 +9,18 @@ metadata:
 data:
   # SamplingInterval is how often we sample kernel signals.
   # Format: Go duration string (e.g., "1s", "500ms", "2m")
-  samplingInterval: "1s"
+  # P1 FIX: Reduced from 1s to 500ms to catch throttling faster
+  samplingInterval: "500ms"
 
   # WriteInterval is how often we write PodAllocation updates to the API.
   # Format: Go duration string
-  writeInterval: "5s"
+  # P1 FIX: Reduced from 5s to 2s to propagate changes faster
+  writeInterval: "2s"
 
   # MinChangePercent is the minimum change required to write an update (hysteresis).
   # Value: 0.0 to 100.0 (percentage)
-  minChangePercent: "2.0"
+  # P0 FIX: Reduced from 2.0% to 1.0% to allow smaller allocation adjustments
+  minChangePercent: "1.0"
 
   # SystemReservePercent is the percentage of node CPU to reserve for system.
   # Value: 0.0 to 100.0 (percentage)
@@ -35,7 +38,8 @@ data:
   # SLOTargetLatencyMs is the target p99 latency for SLO scoring (0 = disabled).
   # Used for utility-based allocation.
   # Value: milliseconds (e.g., "500" for 500ms)
-  sloTargetLatencyMs: "0"
+  # P0 FIX: Enabled fast guardrail with 100ms target (was disabled at "0")
+  sloTargetLatencyMs: "100"
 
   # PrometheusURL is the URL for Prometheus API (empty = disabled).
   # Used for querying latency metrics for SLO scoring.
@@ -45,12 +49,14 @@ data:
   # FastLoopInterval is the interval for the fast SLO guardrail loop (1-2s).
   # This loop responds quickly to SLO violations and throttling pressure.
   # Format: Go duration string
-  fastLoopInterval: "2s"
+  # P0 FIX: Reduced from 2s to 1s to check more frequently for SLO violations
+  fastLoopInterval: "1s"
 
   # SlowLoopInterval is the interval for the slow economic optimizer loop (5-15s).
   # This loop runs market clearing and optimization.
   # Format: Go duration string
-  slowLoopInterval: "10s"
+  # P0 FIX: Reduced from 10s to 3s for 3x more responsive market clearing
+  slowLoopInterval: "3s"
 
   # P99ThresholdMultiplier is the multiplier for p99 latency threshold.
   # Fast loop triggers when p99 > target * P99ThresholdMultiplier.
@@ -60,17 +66,20 @@ data:
   # ThrottlingThreshold is the throttling ratio threshold (0-1).
   # Fast loop triggers when throttling ratio > ThrottlingThreshold.
   # Value: 0.0 to 1.0 (e.g., "0.1" means 10% throttling)
-  throttlingThreshold: "0.1"
+  # P0 FIX: Reduced from 0.1 (10%) to 0.05 (5%) to catch underallocations earlier
+  throttlingThreshold: "0.05"
 
   # FastStepSizeMin is the minimum fast-up step size (0-1).
   # When fast loop triggers, allocation increases by at least this percentage.
   # Value: 0.0 to 1.0 (e.g., "0.20" means 20% minimum increase)
-  fastStepSizeMin: "0.20"
+  # P1 FIX: Increased from 0.20 (20%) to 0.30 (30%) for more aggressive response
+  fastStepSizeMin: "0.30"
 
   # FastStepSizeMax is the maximum fast-up step size (0-1).
   # When fast loop triggers, allocation increases by at most this percentage.
   # Value: 0.0 to 1.0 (e.g., "0.40" means 40% maximum increase)
-  fastStepSizeMax: "0.40"
+  # P1 FIX: Increased from 0.40 (40%) to 0.60 (60%) for more aggressive response
+  fastStepSizeMax: "0.60"
 
   # AllocationMechanism selects the market clearing mechanism.
   # Options: "nash" (Nash Bargaining, default) or "primal-dual" (Distributed Primal-Dual)

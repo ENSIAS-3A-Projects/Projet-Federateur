@@ -10,7 +10,7 @@ import (
 
 func TestParamsForPod_WithRequestsAndLimits(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID: "test-pod-uid",
@@ -61,7 +61,7 @@ func TestParamsForPod_WithRequestsAndLimits(t *testing.T) {
 
 func TestParamsForPod_NoRequests(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -102,7 +102,7 @@ func TestParamsForPod_NoRequests(t *testing.T) {
 
 func TestParamsForPod_NoLimits(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -129,7 +129,7 @@ func TestParamsForPod_NoLimits(t *testing.T) {
 
 func TestParamsForPod_DemandClamping(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -165,7 +165,7 @@ func TestParamsForPod_DemandClamping(t *testing.T) {
 
 func TestParamsForPod_NoContainers(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{},
@@ -191,7 +191,7 @@ func TestParamsForPod_NoContainers(t *testing.T) {
 
 func TestParamsForPod_MinMaxSanityCheck(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -219,7 +219,7 @@ func TestParamsForPod_MinMaxSanityCheck(t *testing.T) {
 
 func TestParamsForPod_PerPodMaxCap(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -247,30 +247,30 @@ func TestParamsForPod_PerPodMaxCap(t *testing.T) {
 
 func TestParamsForPod_WeightComputation(t *testing.T) {
 	calc := NewCalculator(nil) // Tests don't need k8sClient for basic functionality
-	
+
 	testCases := []struct {
-		name          string
-		requestCPU    string
+		name           string
+		requestCPU     string
 		expectedWeight float64
 	}{
 		{
-			name:          "Request 500m",
-			requestCPU:    "500m",
+			name:           "Request 500m",
+			requestCPU:     "500m",
 			expectedWeight: 500.0,
 		},
 		{
-			name:          "Request 1",
-			requestCPU:    "1",
+			name:           "Request 1",
+			requestCPU:     "1",
 			expectedWeight: 1000.0, // 1 CPU = 1000m
 		},
 		{
-			name:          "No request",
-			requestCPU:    "",
+			name:           "No request",
+			requestCPU:     "",
 			expectedWeight: 1.0, // Default to 1
 		},
 		{
-			name:          "Request 50m (less than 1)",
-			requestCPU:    "50m",
+			name:           "Request 50m (less than 1)",
+			requestCPU:     "50m",
 			expectedWeight: 50.0, // max(1, 50) = 50 (50m = 50 millicores)
 		},
 	}
@@ -301,3 +301,33 @@ func TestParamsForPod_WeightComputation(t *testing.T) {
 	}
 }
 
+func TestUsageBasedWeights(t *testing.T) {
+	calc := NewCalculator(nil)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "app",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceCPU: resource.MustParse("200m"),
+					},
+				},
+			}},
+		},
+	}
+
+	// High usage + high demand = high weight
+	params := calc.ParamsForPodWithUsage(pod, 0.5, 400, 100, 4000, 500) // 500m current limit
+	expected := 400.0 * 1.5                                             // 600 (usage 400 * (1 + demand 0.5))
+	if params.Weight < expected*0.95 || params.Weight > expected*1.05 {
+		t.Errorf("Expected weight ~%.0f, got %.0f", expected, params.Weight)
+	}
+
+	// Low usage + no demand = low weight
+	params = calc.ParamsForPodWithUsage(pod, 0.0, 10, 100, 4000, 500) // 500m current limit
+	expected = 10.0
+	if params.Weight < expected*0.95 || params.Weight > expected*1.05 {
+		t.Errorf("Expected weight ~%.0f, got %.0f", expected, params.Weight)
+	}
+}

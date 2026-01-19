@@ -1,7 +1,7 @@
 # MBCAS Metrics Test Script
 # Deploys MBCAS-managed workloads, generates load, and collects detailed metrics
 param(
-    [int]$DurationMinutes = 5,
+    [int]$DurationMinutes = 10,
     [string]$Namespace = "mbcas-eval-test",
     [string]$MinikubeProfile = "mbcas",
     [switch]$SkipSetup = $false,
@@ -20,8 +20,69 @@ New-Item -ItemType Directory -Force -Path $TestResultsDir | Out-Null
 Write-Host "Results directory: $TestResultsDir" -ForegroundColor Cyan
 
 # ------------------------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------------------------
+$Phases = @(
+    @{ Name = "Baseline"; Duration = 20; Load = "gateway:1" },
+    @{ Name = "Supreme Overload (A)"; Duration = 40; Load = "worker-a:20" },
+    @{ Name = "Saturation (A+B)"; Duration = 30; Load = "worker-a:5,worker-b:5" },
+    @{ Name = "Overload (Add Noise)"; Duration = 30; Load = "worker-a:5,worker-b:5,noise:1" },
+    @{ Name = "Cool Down"; Duration = 20; Load = "gateway:1" }
+)
+
+# ------------------------------------------------------------------------------
 # Helper Functions
 # ------------------------------------------------------------------------------
+
+function Set-LoadPattern {
+    param([string]$Namespace, [string]$Pattern, [string]$Mode)
+    
+    Write-Host "  Applying load pattern: $Pattern" -ForegroundColor Magenta
+    
+    # Parse pattern: "worker-a:5,worker-b:2"
+    $targets = $Pattern.Split(",")
+    $commands = @()
+    
+    foreach ($t in $targets) {
+        $parts = $t.Split(":")
+        $name = $parts[0]
+        $intensity = $parts[1]
+        
+        $targetUrl = "http://$name-$Mode.$Namespace.svc.cluster.local:8080"
+        if ($name -eq "gateway") {
+            $targetUrl = "http://gateway-$Mode.$Namespace.svc.cluster.local:8080"
+        }
+        
+        # Build curl loop for this target
+        # intensity determines delay: 1 -> sleep 0.5, 5 -> sleep 0.1
+        $delay = 0.5 / [double]$intensity
+        $commands += "while true; do curl -s -o /dev/null -w `"${name}: %{time_total}\n`" $targetUrl; sleep $delay; done &"
+    }
+    
+    # Combine into one script
+    $fullScript = "echo `"Starting $Pattern`";" + ($commands -join " ") + " wait"
+    
+    # Update load-generator pod with new command
+    kubectl delete pod load-generator -n $Namespace --ignore-not-found --grace-period=0 | Out-Null
+    
+    $yaml = @"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: load-generator
+  namespace: $Namespace
+spec:
+  containers:
+  - name: load-gen
+    image: eval-service:latest
+    imagePullPolicy: Never
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      $fullScript
+"@
+    $yaml | kubectl apply -f - | Out-Null
+}
 
 function Wait-ForPods {
     param([string]$Namespace, [string]$Selector)
@@ -50,26 +111,23 @@ function Wait-ForPods {
 }
 
 function Measure-WorkloadMetrics {
-    param([string]$Namespace, [string]$OutputFile)
+    param([string]$Namespace, [string]$OutputFile, [string]$PhaseName)
     
     $metrics = @{
         timestamp   = (Get-Date -Format "o")
+        phase       = $PhaseName
         pods        = @()
         allocations = @()
-        latency     = @{}
+        latency     = @()
     }
     
     # 0. Latency metrics from load generator
     try {
-        $log = kubectl logs -n $Namespace load-generator --tail=20 2>$null
-        if ($log) {
-            $latencies = $log | Select-String "time_total: ([\d.]+)" | ForEach-Object { [double]$_.Matches[0].Groups[1].Value * 1000 }
-            if ($latencies) {
-                $avg = ($latencies | Measure-Object -Average).Average
-                $p99 = ($latencies | Sort-Object)[[math]::Max(0, [int]($latencies.Count * 0.99) - 1)]
-                $metrics.latency = @{
-                    avgMs = [math]::Round($avg, 2)
-                    p99Ms = [math]::Round($p99, 2)
+        $logs = kubectl logs -n $Namespace load-generator --tail=50 2>$null
+        if ($logs) {
+            foreach ($line in $logs) {
+                if ($line -match "([\w-]+): ([\d.]+)") {
+                    $metrics.latency += @{ target = $Matches[1]; ms = [double]$Matches[2] * 1000 }
                 }
             }
         }
@@ -78,15 +136,6 @@ function Measure-WorkloadMetrics {
     
     # 1. Pod Resource Usage (kubectl top)
     try {
-        # Temporarily relax error action to handle "metrics not available"
-        $prevErrorAction = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        
-        $top = kubectl top pods -n $Namespace --no-headers 2>&1
-        
-        $ErrorActionPreference = $prevErrorAction
-        
-        # Retry logic for metrics server (wait up to 30s for metrics-server to pick up new namespace)
         $top = $null
         for ($i = 0; $i -lt 5; $i++) {
             $top = kubectl top pods -n $Namespace --no-headers 2>$null
@@ -95,10 +144,8 @@ function Measure-WorkloadMetrics {
         }
 
         if ($top) {
-            $topLines = $top -split "`n"
-            foreach ($line in $topLines) {
+            foreach ($line in $top) {
                 if ($line -match "^\s*$") { continue }
-                # Handle potential error messages in output
                 if ($line -match "error:|metrics not available") { continue }
                 
                 $parts = $line.Split(" ", [StringSplitOptions]::RemoveEmptyEntries)
@@ -131,36 +178,10 @@ function Measure-WorkloadMetrics {
             }
         }
     }
-    catch {
-        # Ignore errors if no allocations yet
-    }
+    catch { }
     
-    # Write clean JSON manually to avoid PowerShell serialization issues
-    $json = "{"
-    $json += "`"timestamp`":`"$($metrics.timestamp)`","
-    
-    # Latency (Ensure numbers are never null)
-    $avgMs = if ($null -eq $metrics.latency.avgMs) { 0 } else { $metrics.latency.avgMs }
-    $p99Ms = if ($null -eq $metrics.latency.p99Ms) { 0 } else { $metrics.latency.p99Ms }
-    $json += "`"latency`":{`"avgMs`":$avgMs,`"p99Ms`":$p99Ms},"
-    
-    # Pods
-    $json += "`"pods`":["
-    $podList = @()
-    foreach ($p in $metrics.pods) { $podList += "{`"name`":`"$($p.name)`",`"cpu`":`"$($p.cpu)`",`"memory`":`"$($p.memory)`"}" }
-    $json += ($podList -join ",") + "],"
-    
-    # Allocations
-    $json += "`"allocations`":["
-    $allocList = @()
-    foreach ($a in $metrics.allocations) { 
-        $sp = if ($null -eq $a.shadowPrice) { 0 } else { $a.shadowPrice }
-        $allocList += "{`"name`":`"$($a.name)`",`"pod`":`"$($a.pod)`",`"allocCPU`":`"$($a.allocCPU)`",`"allocLimit`":`"$($a.allocLimit)`",`"shadowPrice`":$sp}" 
-    }
-    $json += ($allocList -join ",") + "]"
-    $json += "}"
-    
-    $json | Out-File -FilePath $OutputFile -Encoding UTF8 -Append
+    # Convert to JSON for storage
+    $metrics | ConvertTo-Json -Depth 10 -Compress | Out-File -FilePath $OutputFile -Encoding UTF8 -Append
 }
 
 # ------------------------------------------------------------------------------
@@ -176,14 +197,11 @@ if (-not $SkipSetup) {
     
     # Build and Load Images
     Write-Host "Building and loading images..." -ForegroundColor Cyan
-    
-    # Build eval-service (Reuse existing logic)
     Push-Location (Join-Path $ProjectRoot "apps\eval-service")
     docker build -t eval-service:latest .
     if ($LASTEXITCODE -ne 0) { throw "Failed to build eval-service" }
     Pop-Location
     
-    # Load into Minikube
     if (Get-Command minikube -ErrorAction SilentlyContinue) {
         Write-Host "Loading image into Minikube (Profile: $MinikubeProfile)..."
         minikube image load eval-service:latest -p $MinikubeProfile
@@ -192,63 +210,42 @@ if (-not $SkipSetup) {
     # Apply Workloads
     Write-Host "Deploying workloads..."
     $workloadsPath = Join-Path $ProjectRoot "k8s\vpa-mbcas-test\workloads-mbcas.yaml"
-    
-    # Modify namespace in files (on the fly application)
     (Get-Content $workloadsPath) -replace "namespace: vpa-mbcas-test", "namespace: $Namespace" | kubectl apply -f -
     
     # Wait for readiness
     Wait-ForPods -Namespace $Namespace -Selector "test=mbcas"
 }
 
-# 2. Start Load Generator
-Write-Host "=== Starting Load Generator ===" -ForegroundColor Cyan
-$loadGenYaml = @"
-apiVersion: v1
-kind: Pod
-metadata:
-  name: load-generator
-  namespace: $Namespace
-spec:
-  containers:
-  - name: load-gen
-    image: eval-service:latest
-    imagePullPolicy: Never
-    command: ["/bin/sh", "-c"]
-    args:
-    - |
-      echo "Starting load generation..."
-      while true; do
-        curl -s -o /dev/null -w "time_total: %{time_total}\n" http://gateway-mbcas.$Namespace.svc.cluster.local:8080
-        sleep 0.1
-      done
-"@
-
-$loadGenYaml | kubectl apply -f -
-
-# 3. Test Loop
-Write-Host "=== Starting Test Loop ($DurationMinutes minutes) ===" -ForegroundColor Cyan
-$startTime = Get-Date
-$endTime = $startTime.AddMinutes($DurationMinutes)
+# 2. Execution Loop
+Write-Host "=== Starting Phasic Test Loop ===" -ForegroundColor Cyan
 $metricsFile = Join-Path $TestResultsDir "metrics.json"
-
-# Initialize metrics file as an array
 "[" | Out-File -FilePath $metricsFile -Encoding UTF8
 
 $first = $true
-while ((Get-Date) -lt $endTime) {
-    $remaining = ($endTime - (Get-Date)).TotalSeconds
-    Write-Host "Collecting metrics... (${remaining}s remaining)" -NoNewline
+foreach ($phase in $Phases) {
+    Write-Host "`n>>> Phase: $($phase.Name) ($($phase.Duration)s)" -ForegroundColor Cyan
+    Set-LoadPattern -Namespace $Namespace -Pattern $phase.Load -Mode "mbcas"
     
-    if (-not $first) {
-        "," | Out-File -FilePath $metricsFile -Encoding UTF8 -Append
+    # Wait for load generator to be ready
+    Start-Sleep -Seconds 5
+    
+    $phaseEndTime = (Get-Date).AddSeconds($phase.Duration)
+    while ((Get-Date) -lt $phaseEndTime) {
+        Write-Host "  Collecting metrics..." -NoNewline
+        if (-not $first) {
+            "," | Out-File -FilePath $metricsFile -Encoding UTF8 -Append
+        }
+        $first = $false
+        Measure-WorkloadMetrics -Namespace $Namespace -OutputFile $metricsFile -PhaseName $phase.Name
+        Write-Host " [Done]" -ForegroundColor Gray
+        Start-Sleep -Seconds 10
     }
-    $first = $false
-    
-    Measure-WorkloadMetrics -Namespace $Namespace -OutputFile $metricsFile
-    
-    Write-Host " [Done]" -ForegroundColor Green
-    Start-Sleep -Seconds 10
 }
+
+# Close JSON array
+"]" | Out-File -FilePath $metricsFile -Encoding UTF8 -Append
+
+Write-Host "Test complete. Results saved to $metricsFile" -ForegroundColor Green
 
 # Close JSON array
 "]" | Out-File -FilePath $metricsFile -Encoding UTF8 -Append

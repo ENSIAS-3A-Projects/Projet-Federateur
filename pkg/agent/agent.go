@@ -167,10 +167,12 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 	}
 
 	// Create Lyapunov stability controller
+	// TEMPORARY: Disabled smoothing for aggressive allocation (all step sizes = 1.0)
+	// This allows full Nash bargaining results to be applied immediately
 	lyapunovController := stability.NewLyapunovController(
-		0.1, // initialStepSize
-		0.2, // minStepSize (increased from 0.01 for faster convergence)
-		1.0, // maxStepSize
+		1.0, // initialStepSize (was 0.1 = 10% dampening)
+		1.0, // minStepSize (was 0.2 = 20% dampening)
+		1.0, // maxStepSize (unchanged)
 	)
 
 	// Create Kalman filter predictor for demand forecasting (if enabled)
@@ -495,8 +497,15 @@ func (a *Agent) runFastGuardrail() error {
 				continue
 			}
 			if applied {
-				// Allocation was updated by fast guardrail, it will be tracked there
-				// The slow loop will pick it up on next cycle
+				// Allocation was updated by fast guardrail.
+				// Lock in high demand (1.0) to prevent the slow economic loop
+				// from immediately reclaiming the resources on the next sweep.
+				a.mu.Lock()
+				if tracker, exists := a.podDemands[pod.UID]; exists {
+					tracker.SetSmoothedDemand(1.0) // Force max demand
+					klog.V(4).InfoS("Fast guardrail locked in high demand", "pod", pod.Name, "namespace", pod.Namespace)
+				}
+				a.mu.Unlock()
 			}
 		}
 	}
@@ -819,6 +828,23 @@ func (a *Agent) writeAllocations() error {
 			klog.InfoS("Updated PodAllocation", "pod", pod.Name, "namespace", pod.Namespace,
 				"request", cpuRequest, "limit", cpuLimit, "previous", currentAlloc)
 		} else {
+			// P0 FIX: Add visibility logging when hysteresis blocks updates
+			// This helps diagnose why allocations stay static despite market clearing running
+			currentLimitMilli := parseCPUToMilli(strings.Split(currentAlloc, ":")[len(strings.Split(currentAlloc, ":"))-1])
+			newLimitMilli := parseCPUToMilli(cpuLimit)
+			changePercent := 0.0
+			if currentLimitMilli > 0 {
+				changePercent = float64(abs(newLimitMilli-currentLimitMilli)) * 100.0 / float64(abs(currentLimitMilli))
+			}
+
+			klog.V(4).InfoS("Skipping allocation write (change below hysteresis threshold)",
+				"pod", pod.Name,
+				"namespace", pod.Namespace,
+				"currentLimit", strings.Split(currentAlloc, ":")[len(strings.Split(currentAlloc, ":"))-1],
+				"newLimit", cpuLimit,
+				"changePercent", fmt.Sprintf("%.2f%%", changePercent),
+				"threshold", fmt.Sprintf("%.2f%%", a.config.MinChangePercent))
+
 			// Allocations didn't change enough for API write, but update internal state
 			// so that the next iteration uses the latest stable value as its starting point.
 			a.mu.Lock()
@@ -947,16 +973,35 @@ func (a *Agent) computeAllocations(
 		// Get actual usage for this pod (0 if not available)
 		actualUsageMilli := a.podUsages[uid]
 
-		// If no usage tracked yet (unknown pod), estimate from original requests or baseline
-		// CRITICAL FIX: Only estimate if NEVER successfully sampled (!a.podSampled[uid]).
-		// If sampled but idle (actualUsageMilli == 0), don't estimate - it's truly idle.
+		// CRITICAL FIX: Estimate usage in two scenarios:
+		// 1. Pod never sampled (!a.podSampled[uid]) - unknown, use original request
+		// 2. Pod has demand but 0 usage - likely measurement issue, not true idleness
+		//    This ensures usage-based weights activate for throttled pods
+		shouldEstimate := false
 		if !a.podSampled[uid] && actualUsageMilli == 0 {
+			shouldEstimate = true
+			klog.V(5).InfoS("Estimating usage for never-sampled pod",
+				"pod", pod.Name, "namespace", pod.Namespace)
+		} else if actualUsageMilli == 0 && demand > 0.1 {
+			// Pod is throttled (demand > 0.1) but reports 0 usage
+			// This is suspicious - likely cgroup read timing or measurement issue
+			// Estimate usage to ensure weight calculation activates
+			shouldEstimate = true
+			klog.V(4).InfoS("Estimating usage for pod with demand but zero usage",
+				"pod", pod.Name, "namespace", pod.Namespace, "demand", demand)
+		}
+
+		if shouldEstimate {
 			if originalReq, ok := a.originalRequests[uid]; ok && originalReq > 0 {
 				// Estimate from original request (safe baseline)
 				actualUsageMilli = originalReq
+				klog.V(5).InfoS("Estimated usage from original request",
+					"pod", pod.Name, "estimatedUsage", actualUsageMilli)
 			} else {
 				// Fallback to baseline
 				actualUsageMilli = baselineMilli
+				klog.V(5).InfoS("Estimated usage from baseline",
+					"pod", pod.Name, "estimatedUsage", actualUsageMilli)
 			}
 		}
 		// Get shadow price from previous cycle for price response
@@ -974,7 +1019,24 @@ func (a *Agent) computeAllocations(
 				shadowPriceCPU, true, 0.5) // elasticity = 0.5 (moderate responsiveness)
 		} else {
 			// Use standard function without price response
-			params = a.demandCalc.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
+			// Get current limit for saturation detection
+			currentLimitMilli := int64(0)
+			if allocStr, ok := a.allocations[uid]; ok && allocStr != "" {
+				// Parse limit from allocation string "request:limit"
+				parts := strings.Split(allocStr, ":")
+				if len(parts) >= 2 {
+					if limitQty, err := resource.ParseQuantity(parts[1]); err == nil {
+						currentLimitMilli = limitQty.MilliValue()
+					}
+				}
+			}
+			if currentLimitMilli == 0 {
+				// Fallback to original limit
+				if origLimit, ok := a.originalLimits[uid]; ok {
+					currentLimitMilli = origLimit
+				}
+			}
+			params = a.demandCalc.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli, currentLimitMilli)
 		}
 
 		// CRITICAL FIX: Enforce minimum floors to prevent feedback loop
@@ -1335,6 +1397,16 @@ func (a *Agent) computeAllocations(
 		}
 		stableAlloc := a.lyapunovController.BoundedUpdateWithCongestion(currentAlloc, desiredAlloc, congestionFactor)
 		stableAllocations[uid] = stableAlloc
+
+		// DIAGNOSTIC: Log smoothing effect
+		if pod, ok := podMap[uid]; ok && stableAlloc != desiredAlloc {
+			klog.V(3).InfoS("Lyapunov smoothing applied",
+				"pod", pod.Name,
+				"nashResult", desiredAlloc,
+				"smoothedResult", stableAlloc,
+				"dampening", fmt.Sprintf("%.1f%%", (1.0-float64(stableAlloc)/float64(desiredAlloc))*100),
+				"stepSize", a.lyapunovController.GetStepSize())
+		}
 
 		// Update UtilityParams with new allocation for metrics
 		if util, ok := utilityParams[uid]; ok {

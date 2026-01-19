@@ -105,6 +105,17 @@ func (t *Tracker) Reset() {
 	t.smoothed = 0.0
 }
 
+// SetSmoothedDemand manually sets the smoothed demand value.
+// Used for coordinating control loops (e.g., Fast Guardrail locking in demand).
+func (t *Tracker) SetSmoothedDemand(value float64) {
+	if value < 0 {
+		value = 0
+	} else if value > 1 {
+		value = 1
+	}
+	t.smoothed = value
+}
+
 // RecordFailure records a cgroup read failure.
 // Returns true if demand should be treated as zero (sustained failure).
 func (t *Tracker) RecordFailure() bool {

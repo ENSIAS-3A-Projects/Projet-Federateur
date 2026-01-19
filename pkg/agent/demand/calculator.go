@@ -79,9 +79,13 @@ func (c *Calculator) ParamsForPod(
 		}
 	}
 
-	// Compute weight: max(1, requestCPU_milli)
-	// This uses existing K8s requests as budget/importance signal
-	weight := float64(requestMilli)
+	// Compute weight based on actual usage + demand signal
+	// This makes Nash bargaining allocate more to high-demand pods
+	weight := float64(requestMilli) // Start with request as baseline
+
+	// If we have actual usage, use it as the primary weight signal
+	// Note: actualUsageMilli is 0 in this legacy function (ParamsForPod)
+	// The usage-based calculation happens in ParamsForPodWithUsage below
 	if weight < 1.0 {
 		weight = 1.0
 	}
@@ -90,7 +94,7 @@ func (c *Calculator) ParamsForPod(
 	// Note: We use context.Background() here since this is called from agent loops
 	// In production, consider passing context through the call chain
 	priorityMultiplier := c.getPriorityMultiplier(context.Background(), pod)
-	
+
 	// Apply annotation-based override if present (mbcas.io/priority-multiplier)
 	if annMultiplier, ok := pod.Annotations["mbcas.io/priority-multiplier"]; ok {
 		if parsed, err := strconv.ParseFloat(annMultiplier, 64); err == nil && parsed > 0 {
@@ -107,20 +111,26 @@ func (c *Calculator) ParamsForPod(
 	// Compute effective bid: weight × demand
 	bid := weight * demand
 
-	// Compute min: max(baselineMilli, requestCPU_milli)
-	// Ensures limit >= request (K8s constraint)
+	// Compute min: Use baselineMilli as the floor for efficiency.
+	// We allow MBCAS to allocate LESS than the static YAML request if the pod is idle
+	// and doesn't need it. This ensures we beat VPA's resource footprint.
+	// But we keep the Request as the floor if the pod is actually active (usage > 0).
 	minMilli := baselineMilli
-	if requestMilli > minMilli {
+
+	// If actual usage is reported and it's substantial, we might want to respect request.
+	// However, for pure cost optimization, the baseline is the true safety floor.
+	if requestMilli > minMilli && demand > 0.05 {
+		// If there is significant throttling pressure (>5%), we respect the request
+		// as a hint of minimum needed capability.
 		minMilli = requestMilli
 	}
 
-	// Compute max: limitCPU_milli (or nodeCapMilli if no limit)
-	maxMilli := limitMilli
-	if maxMilli == 0 {
-		maxMilli = nodeCapMilli
-	}
+	// Compute max: Use nodeCapMilli for ELASTIC LIMITS (resource pooling)
+	// This allows pods to burst beyond their static YAML limits when resources are available
+	// The Nash Solver will allocate unused capacity from idle pods to busy ones
+	maxMilli := nodeCapMilli
 
-	// Optional: Per-pod max cap to prevent one pod from consuming entire node
+	// Per-pod max cap to prevent one pod from consuming entire node
 	// Use 90% of node capacity as a reasonable upper bound
 	perPodMaxCap := int64(float64(nodeCapMilli) * 0.9)
 	if maxMilli > perPodMaxCap {
@@ -140,8 +150,7 @@ func (c *Calculator) ParamsForPod(
 		Weight:           weight,
 		ActualUsageMilli: 0, // Legacy function, no actual usage
 	}
-	
-	
+
 	return params
 }
 
@@ -153,11 +162,76 @@ func (c *Calculator) ParamsForPodWithUsage(
 	actualUsageMilli int64,
 	baselineMilli int64,
 	nodeCapMilli int64,
+	currentLimitMilli int64, // Current limit for saturation detection
 ) allocation.PodParams {
 	// Get base params from the existing function
 	params := c.ParamsForPod(pod, demand, baselineMilli, nodeCapMilli)
+
 	// Add actual usage
 	params.ActualUsageMilli = actualUsageMilli
+
+	// SATURATION AWARENESS: Detect when pod is at/near its current limit
+	// If usage > 90% of current limit, boost demand to retain/expand allocation
+	saturationThreshold := 0.90
+	if currentLimitMilli > 0 && actualUsageMilli > 0 {
+		usageRatio := float64(actualUsageMilli) / float64(currentLimitMilli)
+		if usageRatio >= saturationThreshold {
+			// Pod is saturated - boost demand to prevent allocation collapse
+			saturationBoost := (usageRatio - saturationThreshold) / (1.0 - saturationThreshold) // 0 to 1
+			if saturationBoost > 1.0 {
+				saturationBoost = 1.0
+			}
+			// Minimum demand of 0.5 when saturated, up to 1.0 when fully at limit
+			saturatedDemand := 0.5 + saturationBoost*0.5
+			if demand < saturatedDemand {
+				klog.V(4).InfoS("Saturation awareness: boosting demand",
+					"pod", pod.Name,
+					"namespace", pod.Namespace,
+					"usageRatio", usageRatio,
+					"originalDemand", demand,
+					"boostedDemand", saturatedDemand)
+				demand = saturatedDemand
+				params.Demand = demand
+			}
+		}
+	}
+
+	// EFFICIENCY TARGET: Aim for lower resources than VPA during normal operation.
+	// VPA typically targets 1.25x usage (80% utilization).
+	// We target 1.1x usage (90% utilization) as our baseline headroom.
+	efficiencyTarget := 1.1
+
+	// If throttling (demand) exceeds 5% (user threshold), we increase weight aggressively
+	// to resolve the bottleneck.
+	if demand > 0.05 {
+		// Linear ramp for weight: At 5% pressure, multiplier is 1.1.
+		// At 100% pressure (demand=1.0), multiplier reaches ~3.0.
+		efficiencyTarget = 1.1 + 2.0*(demand-0.05)
+	}
+
+	// Calculate usage-based weight
+	usageBasedWeight := float64(actualUsageMilli) * efficiencyTarget
+
+	// Override the request-based weight with usage-based weight
+	params.Weight = usageBasedWeight
+
+	// Recalculate bid with new weight
+	params.Bid = params.Weight * demand
+
+	klog.V(5).InfoS("Using efficiency-aware weight",
+		"pod", pod.Name,
+		"namespace", pod.Namespace,
+		"actualUsage", actualUsageMilli,
+		"demand", demand,
+		"efficiencyTarget", efficiencyTarget,
+		"weight", params.Weight)
+
+	// Ensure minimum weight
+	if params.Weight < 1.0 {
+		params.Weight = 1.0
+		params.Bid = params.Weight * demand
+	}
+
 	return params
 }
 
@@ -177,7 +251,8 @@ func (c *Calculator) ParamsForPodWithPrice(
 	elasticity float64,
 ) allocation.PodParams {
 	// Get base params with usage
-	params := c.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli)
+	// Pass 0 for currentLimitMilli since price-based function doesn't track it directly
+	params := c.ParamsForPodWithUsage(pod, demand, actualUsageMilli, baselineMilli, nodeCapMilli, 0)
 
 	// Apply price response if enabled and price is available
 	if enablePriceResponse && shadowPrice > 0 && actualUsageMilli > 0 {
@@ -267,7 +342,7 @@ func (c *Calculator) getPriorityMultiplier(ctx context.Context, pod *corev1.Pod)
 	}
 
 	// Linear scaling: priority 1000 = 1.0x, priority 10000 = 2.0x
-	multiplier := 1.0 + (priorityValue/10000.0) * 1.0
+	multiplier := 1.0 + (priorityValue/10000.0)*1.0
 	if multiplier < 0.1 {
 		multiplier = 0.1 // Minimum 0.1x
 	}
