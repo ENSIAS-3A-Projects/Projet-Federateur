@@ -10,6 +10,7 @@ import (
 // Tracker tracks and smooths demand signals using exponential moving average.
 // Implements "fast up, slow down" behavior to avoid oscillations.
 type Tracker struct {
+	// Smoothed demand value
 	smoothed float64
 	// Track consecutive zero readings for faster decay
 	zeroCount int
@@ -18,6 +19,10 @@ type Tracker struct {
 	consecutiveFailures int
 	lastFailureTime     time.Time
 	totalFailures       int64
+
+	// Smoothing parameters
+	AlphaIncrease float64
+	AlphaDecrease float64
 }
 
 const (
@@ -25,50 +30,51 @@ const (
 	MaxConsecutiveFailures = 3
 )
 
-// NewTracker creates a new demand tracker.
+// NewTracker creates a new demand tracker with default values.
 func NewTracker() *Tracker {
 	return &Tracker{
-		smoothed: 0.0,
+		smoothed:      0.0,
+		AlphaIncrease: 0.6, // Default: Fast Up
+		AlphaDecrease: 0.2, // Default: Slow Down
 	}
 }
 
 // Update updates the tracker with a new raw demand value and returns the smoothed value.
-// Uses exponential moving average with different rates for increases vs decreases.
+// Uses exponential moving average with configurable rates.
 func (t *Tracker) Update(rawDemand float64) float64 {
 	const (
-		alphaIncrease      = 0.6 // Fast response to increases (increased from 0.3 for faster reaction)
-		alphaDecrease      = 0.2 // Slow decay to avoid oscillations
-		fastDecayThreshold = 5   // After 5 consecutive zeros, use fast decay
-		fastDecayAlpha     = 0.5 // Fast decay rate
-		rapidIncreaseAlpha = 0.8 // Very fast response for rapid increases
+		fastDecayThreshold     = 5   // After 5 consecutive zeros, use fast decay
+		fastDecayMultiplier    = 2.5 // Multiplier for decay alpha when zero count high
 		rapidIncreaseThreshold = 0.3 // If increase > 30% of current, use rapid alpha
 	)
 
 	var alpha float64
 	if rawDemand > t.smoothed {
-		// Fast up: use higher alpha
+		// Increasing
+		alpha = t.AlphaIncrease
+
 		// Detect rapid increases (rate of change > threshold)
-		increaseRate := (rawDemand - t.smoothed) / math.Max(t.smoothed, 0.01) // Avoid division by zero
-		if increaseRate > rapidIncreaseThreshold {
-			// Very rapid increase: use fastest alpha
-			alpha = rapidIncreaseAlpha
-		} else {
-			// Normal increase: use standard fast alpha
-			alpha = alphaIncrease
+		// Only apply rapid increase logic if we are NOT in cost efficiency mode (default behavior)
+		// In cost efficiency mode, we strictly follow AlphaIncrease (which will be low)
+		increaseRate := (rawDemand - t.smoothed) / math.Max(t.smoothed, 0.01)
+		if increaseRate > rapidIncreaseThreshold && t.AlphaIncrease > 0.5 {
+			// Boost alpha for rapid response only if base alpha is already high (aggressive mode)
+			alpha = math.Min(1.0, t.AlphaIncrease*1.5)
 		}
-		t.zeroCount = 0 // Reset zero counter on any increase
+
+		t.zeroCount = 0
 	} else if rawDemand == 0 {
-		// Track consecutive zeros for accelerated decay
+		// Zero reading
 		t.zeroCount++
 		if t.zeroCount >= fastDecayThreshold {
-			// FIXED: Fast decay after sustained zero demand
-			alpha = fastDecayAlpha
+			// Accelerated decay for sustained zeros
+			alpha = math.Min(1.0, t.AlphaDecrease*fastDecayMultiplier)
 		} else {
-			alpha = alphaDecrease
+			alpha = t.AlphaDecrease
 		}
 	} else {
-		// Slow down: use lower alpha
-		alpha = alphaDecrease
+		// Decreasing (non-zero)
+		alpha = t.AlphaDecrease
 		t.zeroCount = 0
 	}
 

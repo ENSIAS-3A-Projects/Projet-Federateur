@@ -78,6 +78,25 @@ type PodParams struct {
 	ActualUsageMilli int64   // Actual CPU usage in millicores (from cgroup metrics)
 }
 
+// MarketConfig holds configuration for the market clearing mechanism.
+type MarketConfig struct {
+	// CostEfficiencyMode enables aggressive cost optimization logic.
+	CostEfficiencyMode bool
+	// NeedHeadroomFactor is the conservative headroom for actual need.
+	NeedHeadroomFactor float64
+	// TargetThrottling is the acceptable throttling target (0-1).
+	TargetThrottling float64
+}
+
+// DefaultMarketConfig returns the default market configuration.
+func DefaultMarketConfig() MarketConfig {
+	return MarketConfig{
+		CostEfficiencyMode: false,
+		NeedHeadroomFactor: 0.15, // Default 15%
+		TargetThrottling:   0.0,
+	}
+}
+
 // ClearMarket performs demand-capped allocation.
 //
 // This replaces the original fair-share algorithm with:
@@ -87,24 +106,24 @@ type PodParams struct {
 //  4. If total baselines > capacity: scale baselines (overloaded)
 //
 // Returns allocations in millicores (int64).
-func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams) map[types.UID]int64 {
-	result := ClearMarketWithMetadata(capacityMilli, pods)
+func ClearMarket(capacityMilli int64, pods map[types.UID]PodParams, config MarketConfig) map[types.UID]int64 {
+	result := ClearMarketWithMetadata(capacityMilli, pods, config)
 	return result.Allocations
 }
 
 // ClearMarketWithMetadata performs allocation and returns metadata for observability.
-func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams) AllocationResult {
-	return clearMarketInternal(capacityMilli, pods, false)
+func ClearMarketWithMetadata(capacityMilli int64, pods map[types.UID]PodParams, config MarketConfig) AllocationResult {
+	return clearMarketInternal(capacityMilli, pods, config, false)
 }
 
 // ClearMarketNash performs allocation using the formal NashBargainingSolution solver.
 // This provides mathematically optimal Nash Bargaining Solution with verified axioms.
-func ClearMarketNash(capacityMilli int64, pods map[types.UID]PodParams) AllocationResult {
-	return clearMarketInternal(capacityMilli, pods, true)
+func ClearMarketNash(capacityMilli int64, pods map[types.UID]PodParams, config MarketConfig) AllocationResult {
+	return clearMarketInternal(capacityMilli, pods, config, true)
 }
 
 // clearMarketInternal is the common implementation for both allocation modes.
-func clearMarketInternal(capacityMilli int64, pods map[types.UID]PodParams, useNashSolver bool) AllocationResult {
+func clearMarketInternal(capacityMilli int64, pods map[types.UID]PodParams, config MarketConfig, useNashSolver bool) AllocationResult {
 	if len(pods) == 0 {
 		return AllocationResult{
 			Allocations:        make(map[types.UID]int64),
@@ -122,8 +141,15 @@ func clearMarketInternal(capacityMilli int64, pods map[types.UID]PodParams, useN
 	totalMin := int64(0)
 
 	for uid, p := range pods {
-		need := computeNeed(p)
+		need := computeNeed(p, config.NeedHeadroomFactor)
 		want := computeWant(p)
+
+		// In Cost Efficiency Mode, aggressive want reduction
+		if config.CostEfficiencyMode {
+			// Want is just need (no greedy expansion beyond headroom)
+			want = need
+		}
+
 		needs[uid] = need
 		wants[uid] = want
 		totalNeed += need
@@ -144,27 +170,53 @@ func clearMarketInternal(capacityMilli int64, pods map[types.UID]PodParams, useN
 		for _, a := range allocs {
 			totalAlloc += a
 		}
-	} else if totalWant > capacityMilli {
+	} else if totalWant > capacityMilli && !config.CostEfficiencyMode {
 		// Step 3: CONGESTED - wants exceed capacity
-		// Use Kalai-Smorodinsky for faster convergence in congestion, Nash for uncongested/overloaded
+		// Normal mode: apply Nash bargaining or Kalai-Smorodinsky
 		if useNashSolver {
-			// Use Kalai-Smorodinsky for congested mode (faster proportional convergence)
 			allocs, nashIterations = kalaiSolve(pods, capacityMilli)
 		} else {
-			// Pass wants (not needs) to Nash reduction
 			allocs = nashReduce(wants, pods, capacityMilli)
-			nashIterations = 0 // Heuristic doesn't track iterations
+			nashIterations = 0
 		}
 		mode = ModeCongested
 		for _, a := range allocs {
 			totalAlloc += a
 		}
 	} else {
-		// Step 4: UNCONGESTED - give everyone only what they NEED (not want)
-		// This is the key change: conservative allocation to avoid waste
-		allocs = clampToBounds(needs, pods)
-		mode = ModeUncongested
-		nashIterations = 0
+		// Step 4: UNCONGESTED (or Cost Mode where we refuse "Want")
+		// Give everyone only what they NEED.
+		// In Cost Efficiency Mode, this "Need" is already aggressive (low headroom).
+
+		// MaximizeUtilization / Search Logic for Cost Efficiency
+		if config.CostEfficiencyMode {
+			// In cost mode, we treat capacity as a soft limit if needed,
+			// but primarily we allocate explicitly based on tight needs.
+			// "SearchMinViable" is implicitly handled by the tight NeedHeadroomFactor
+			// passed to computeNeed.
+			// We DO NOT give "Want" (greedy expansion).
+			// If totalNeed > capacity, we still reduce (Congested logic via Nash fallback
+			// or just proportional reduction if strictly cost focused).
+			// If totalNeed > capacity in cost mode, we definitely are congested.
+
+			if totalNeed > capacityMilli {
+				// Congested even with tight needs -> use Nash/Kalai on NEEDs
+				allocs, nashIterations = kalaiSolveOnNeeds(pods, needs, capacityMilli)
+				mode = ModeCongested
+			} else {
+				// Satisfied with tight needs
+				allocs = clampToBounds(needs, pods)
+				mode = ModeUncongested
+			}
+		} else {
+			// Standard mode: "Need" allocation in uncongested state
+			allocs = clampToBounds(needs, pods)
+			mode = ModeUncongested
+		}
+
+		if nashIterations == 0 {
+			nashIterations = 0
+		}
 		for _, a := range allocs {
 			totalAlloc += a
 		}
@@ -196,7 +248,7 @@ func nashSolve(pods map[types.UID]PodParams, capacity int64) (map[types.UID]int6
 			Weight:   p.Weight,
 			Baseline: p.MinMilli,
 			MaxAlloc: p.MaxMilli,
-			Demand:   computeNeed(p),
+			Demand:   computeNeed(p, NeedHeadroomFactor), // Use default for pure Nash solver unless updated
 		})
 	}
 
@@ -210,15 +262,15 @@ func kalaiSolve(pods map[types.UID]PodParams, capacity int64) (map[types.UID]int
 	// Convert PodParams to KalaiSmorodinskyParams
 	agents := make([]KalaiSmorodinskyParams, 0, len(pods))
 	for uid, p := range pods {
-		need := computeNeed(p)
-		ideal := need // Ideal point = need (what they want)
+		need := computeNeed(p, NeedHeadroomFactor) // Use default for compatibility
+		ideal := need                              // Ideal point = need (what they want)
 		if ideal > p.MaxMilli {
 			ideal = p.MaxMilli
 		}
 		if ideal < p.MinMilli {
 			ideal = p.MinMilli
 		}
-		
+
 		agents = append(agents, KalaiSmorodinskyParams{
 			UID:      uid,
 			Weight:   p.Weight,
@@ -231,6 +283,27 @@ func kalaiSolve(pods map[types.UID]PodParams, capacity int64) (map[types.UID]int
 
 	allocs := KalaiSmorodinskySolution(capacity, agents)
 	// Kalai-Smorodinsky is direct (no iterations), but return 1 to indicate it was used
+	return allocs, 1
+}
+
+// kalaiSolveOnNeeds uses KalaiSmorodinskySolution but prioritizes NEEDS not WANTS.
+func kalaiSolveOnNeeds(pods map[types.UID]PodParams, needs map[types.UID]int64, capacity int64) (map[types.UID]int64, int) {
+	agents := make([]KalaiSmorodinskyParams, 0, len(pods))
+	for uid, p := range pods {
+		need := needs[uid]
+		// In cost mode, ideal is equal to need (we don't want more)
+		// But if need < min, ideal should be min? No, need is already clamped to min.
+
+		agents = append(agents, KalaiSmorodinskyParams{
+			UID:      uid,
+			Weight:   p.Weight,
+			Baseline: p.MinMilli,
+			Ideal:    need, // Ideal is purely the need
+			MaxAlloc: p.MaxMilli,
+			Demand:   need,
+		})
+	}
+	allocs := KalaiSmorodinskySolution(capacity, agents)
 	return allocs, 1
 }
 
@@ -307,15 +380,16 @@ func ComputeRequestAllocationsWithMode(limits map[types.UID]int64, pods map[type
 
 // computeNeed estimates the CONSERVATIVE CPU required based on actual usage.
 // This represents what the pod truly NEEDS to function without throttling.
-// It uses a small headroom (15%) to handle normal variance.
+// It uses a small headroom (configured via config or default) to handle normal variance.
 //
-// Need = actual_usage * 1.15 (clamped to bounds)
+// Need = actual_usage * (1 + headroomFactor) (clamped to bounds)
 //
 // Use computeNeed for uncongested mode to avoid over-provisioning.
-func computeNeed(p PodParams) int64 {
+func computeNeed(p PodParams, headroomFactor float64) int64 {
 	if p.ActualUsageMilli > 0 {
-		// Conservative: actual usage + 15% headroom
-		need := int64(float64(p.ActualUsageMilli) * (1.0 + NeedHeadroomFactor))
+		// Conservative: actual usage + headroom
+		// If headroomFactor is 0 (cost mode), this is just actual usage.
+		need := int64(float64(p.ActualUsageMilli) * (1.0 + headroomFactor))
 
 		// Clamp to bounds
 		if need < p.MinMilli {

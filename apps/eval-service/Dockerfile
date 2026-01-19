@@ -9,6 +9,7 @@ RUN go mod init eval-service && go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o eval-service main.go
 
 FROM alpine:latest
+RUN apk add --no-cache curl
 WORKDIR /app
 COPY --from=builder /app/eval-service .
 

@@ -382,6 +382,11 @@ func (a *Agent) sample() error {
 		tracker, exists := a.podDemands[pod.UID]
 		if !exists {
 			tracker = demand.NewTracker()
+			// Set smoothing parameters from config if in cost efficiency mode
+			if a.config.CostEfficiencyMode {
+				tracker.AlphaIncrease = a.config.AlphaUp
+				tracker.AlphaDecrease = a.config.AlphaDown
+			}
 			a.podDemands[pod.UID] = tracker
 		}
 
@@ -510,6 +515,32 @@ func (a *Agent) slowOptimizerLoop() {
 		case <-a.ctx.Done():
 			return
 		case <-ticker.C:
+			// Compute Allocations (Policy)
+			// ---------------------------
+			// This uses the "slow" optimizer loop (market clearing).
+			// Market clearing determines the optimal distribution based on demands.
+			// The ticker ensures this block runs at the configured SlowLoopInterval.
+
+			// Get pod details for computeGlobalThrottling
+			pods, err := a.discoverPods()
+			if err != nil {
+				klog.ErrorS(err, "Failed to discover pods for slow loop")
+				continue
+			}
+
+			// Cost Efficiency Mode: Idle Decay and Global Throttling
+			if a.config.CostEfficiencyMode {
+				a.applyIdleDecay()
+			}
+
+			// Log global throttling stats for observability
+			globalThrottling := a.computeGlobalThrottling(pods)
+			if globalThrottling > a.config.TargetThrottling {
+				klog.V(2).InfoS("Global throttling above target",
+					"current", globalThrottling,
+					"target", a.config.TargetThrottling)
+			}
+
 			if err := a.writeAllocations(); err != nil {
 				klog.ErrorS(err, "Slow optimizer error")
 			} else if a.healthServer != nil {
@@ -788,6 +819,12 @@ func (a *Agent) writeAllocations() error {
 			klog.InfoS("Updated PodAllocation", "pod", pod.Name, "namespace", pod.Namespace,
 				"request", cpuRequest, "limit", cpuLimit, "previous", currentAlloc)
 		} else {
+			// Allocations didn't change enough for API write, but update internal state
+			// so that the next iteration uses the latest stable value as its starting point.
+			a.mu.Lock()
+			a.allocations[uid] = newAlloc
+			a.mu.Unlock()
+
 			// Allocations didn't change, but update shadow price if it changed
 			// This ensures shadow price is always current even when allocations are stable
 			shadowPrice := 0.0
@@ -1192,189 +1229,34 @@ func (a *Agent) computeAllocations(
 		coalitionGroups[coalitionID] = append(coalitionGroups[coalitionID], uid)
 	}
 
-	// If all pods are in "default" coalition, skip coalition optimization
-	useCoalitions := false
-	if len(coalitionGroups) > 1 || (len(coalitionGroups) == 1 && coalitionGroups["default"] == nil) {
-		useCoalitions = true
-	}
+	// Coalition grouping: skip coalition grouping for now (handled by unified market)
+	_ = coalitionGroups
 
 	// Select allocation mechanism based on config
 	var allocations map[types.UID]int64
 	var needsMap map[types.UID]int64 // Track needs for mode determination
-	mechanism := a.config.AllocationMechanism
-	if mechanism == "" {
-		mechanism = "nash" // Default
+	var marketResult allocation.AllocationResult
+
+	// Calculate allocations
+	marketConfig := allocation.MarketConfig{
+		CostEfficiencyMode: a.config.CostEfficiencyMode,
+		NeedHeadroomFactor: a.config.NeedHeadroomFactor,
+		TargetThrottling:   a.config.TargetThrottling,
 	}
 
-	// If using coalitions, compute joint allocation per coalition
-	if useCoalitions && mechanism == "nash" {
-		allocations = make(map[types.UID]int64)
-		needsMap = make(map[types.UID]int64)
-
-		// Allocate capacity to each coalition, then distribute within coalition
-		for _, coalitionPods := range coalitionGroups {
-			if len(coalitionPods) == 0 {
-				continue
-			}
-
-			// Build coalition-level PodParams (aggregate demands)
-			coalitionParams := make(map[types.UID]allocation.PodParams)
-			coalitionTotalNeed := int64(0)
-			coalitionTotalMin := int64(0)
-
-			for _, uid := range coalitionPods {
-				if p, ok := podParams[uid]; ok {
-					coalitionParams[uid] = p
-					need := int64(float64(p.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
-					if need < p.MinMilli {
-						need = p.MinMilli
-					}
-					if need > p.MaxMilli {
-						need = p.MaxMilli
-					}
-					coalitionTotalNeed += need
-					coalitionTotalMin += p.MinMilli
-				}
-			}
-
-			// Allocate capacity proportionally to coalition size/need
-			// Simple approach: allocate based on total need ratio
-			totalSystemNeed := int64(0)
-			for _, p := range podParams {
-				need := int64(float64(p.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
-				if need < p.MinMilli {
-					need = p.MinMilli
-				}
-				if need > p.MaxMilli {
-					need = p.MaxMilli
-				}
-				totalSystemNeed += need
-			}
-
-			var coalitionCapacity int64
-			if totalSystemNeed > 0 {
-				coalitionCapacity = int64(float64(availableMilli) * float64(coalitionTotalNeed) / float64(totalSystemNeed))
-			} else {
-				coalitionCapacity = availableMilli / int64(len(coalitionGroups))
-			}
-
-			// Run Nash/Kalai-Smorodinsky on coalition
-			coalitionAllocs := allocation.ClearMarketNash(coalitionCapacity, coalitionParams)
-
-			// Distribute coalition allocation to pods
-			for uid, alloc := range coalitionAllocs.Allocations {
-				allocations[uid] = alloc
-				if p, ok := podParams[uid]; ok {
-					need := p.ActualUsageMilli + int64(float64(p.ActualUsageMilli)*0.15)
-					if need < p.MinMilli {
-						need = p.MinMilli
-					}
-					if need > p.MaxMilli {
-						need = p.MaxMilli
-					}
-					needsMap[uid] = need
-				}
-			}
-		}
-	} else {
-		// Normal per-pod allocation (no coalition grouping)
-		if mechanism == "primal-dual" {
-			// Use distributed primal-dual price-clearing
-			// Initialize allocations for utility calculation
-			for uid, util := range utilityParams {
-				currentAlloc := a.getCurrentAllocationMilli(uid)
-				if currentAlloc == 0 {
-					currentAlloc = util.BaselineCPU
-				}
-				util.SetAllocation(currentAlloc)
-			}
-
-			// Convert to primal-dual agents
-			primalDualAgents := allocation.ConvertUtilityParamsToPrimalDualAgents(utilityParams)
-
-			// Create coordinator (reuse shadow price if available)
-			initialLambda := shadowPriceCPU
-			if initialLambda <= 0 {
-				initialLambda = 0.0
-			}
-			coordinator := allocation.NewPrimalDualCoordinator(
-				0.1, // eta: step size
-				initialLambda,
-				0.01, // tolerance
-				50,   // max iterations (faster than Nash)
-			)
-
-			// Run primal-dual price-clearing
-			result := allocation.PrimalDualPriceClearing(availableMilli, primalDualAgents, coordinator)
-			allocations = result.Allocations
-
-			// Compute needs from utility params (for mode determination)
-			needsMap = make(map[types.UID]int64)
-			for uid, util := range utilityParams {
-				// Use actual usage + headroom as need estimate
-				if podParam, ok := podParams[uid]; ok && (podParam.ActualUsageMilli > 0 || a.podSampled[uid]) {
-					need := int64(float64(podParam.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
-					if need < util.BaselineCPU {
-						need = util.BaselineCPU
-					}
-					if need > util.MaxCPU {
-						need = util.MaxCPU
-					}
-					needsMap[uid] = need
-				} else {
-					needsMap[uid] = util.BaselineCPU
-				}
-			}
-
-			// Update shadow price from result
-			if a.shadowPrices == nil {
-				a.shadowPrices = price.NewShadowPrices()
-			}
-			a.shadowPrices.Update(result.ShadowPrice, 0, 0)
-
-			klog.InfoS("Primal-dual allocation completed",
-				"iterations", result.Iterations,
-				"converged", result.Converged,
-				"shadowPrice", result.ShadowPrice)
-		} else {
-			// Use Nash Bargaining (default)
-			// Convert UtilityParams to NashBargainingParams
-			nashAgents := make([]allocation.NashBargainingParams, 0, len(utilityParams))
-			for uid, util := range utilityParams {
-				// Use current allocation as demand estimate (or min if no current allocation)
-				currentAlloc := a.getCurrentAllocationMilli(uid)
-				if currentAlloc == 0 {
-					currentAlloc = util.BaselineCPU
-				}
-				util.SetAllocation(currentAlloc)
-
-				nashParams := util.ToNashBargainingParams(string(uid))
-				// Update Demand field with actual need estimate from podParams
-				if podParam, ok := podParams[uid]; ok && (podParam.ActualUsageMilli > 0 || a.podSampled[uid]) {
-					// Use actual usage + headroom as demand estimate
-					nashParams.Demand = int64(float64(podParam.ActualUsageMilli) * (1.0 + a.config.NeedHeadroomFactor))
-					if nashParams.Demand < nashParams.Baseline {
-						nashParams.Demand = nashParams.Baseline
-					}
-					if nashParams.Demand > nashParams.MaxAlloc {
-						nashParams.Demand = nashParams.MaxAlloc
-					}
-				} else {
-					nashParams.Demand = nashParams.Baseline
-				}
-				nashAgents = append(nashAgents, nashParams)
-			}
-
-			// Use formal Nash Bargaining Solution
-			allocations = allocation.NashBargainingSolution(availableMilli, nashAgents)
-
-			// Build needs map from nash agents
-			needsMap = make(map[types.UID]int64)
-			for _, agent := range nashAgents {
-				needsMap[agent.UID] = agent.Demand
-			}
-		}
+	if a.config.CostEfficiencyMode {
+		// In cost mode, use stricter headroom
+		marketConfig.NeedHeadroomFactor = 0.05
 	}
+
+	// Use ClearMarketWithMetadata which handles CostEfficiencyMode internally
+	marketResult = allocation.ClearMarketWithMetadata(availableMilli, podParams, marketConfig)
+	allocations = marketResult.Allocations
+	needsMap = marketResult.Needs
+	shadowPriceCPU = float64(marketResult.TotalAlloc) / float64(availableMilli) // Simplified shadow price if not primal-dual
+
+	// If using groups or specific mechanisms, we could still use them here,
+	// but for now let's prioritize the unified CostEfficiency aware clearing.
 
 	// Apply contention-aware adjustments before Lyapunov smoothing
 	// Detect contention by aggregating throttling signals (not pod names)
@@ -1480,38 +1362,20 @@ func (a *Agent) computeAllocations(
 	converging := a.lyapunovController.CheckAndAdaptStepSize(potential)
 	RecordLyapunovMetrics(potential, a.lyapunovController.GetStepSize(), converging)
 
-	// Compute request allocations based on limit allocations (mode-aware)
-	// Mode will be determined below, but we need to compute it first
-	// For now, compute requests with mode-aware function after mode is determined
-	requestAllocs := make(map[types.UID]int64)
-
-	// Determine mode based on total allocation vs capacity
+	// Compute total allocation for metrics
 	totalAlloc := int64(0)
-	totalNeed := int64(0)
 	for _, alloc := range stableAllocations {
 		totalAlloc += alloc
 	}
-	for _, need := range needsMap {
-		totalNeed += need
-	}
 
-	mode := allocation.ModeUncongested
-	if totalNeed > availableMilli {
-		mode = allocation.ModeCongested
-	}
+	requestAllocs := marketResult.RequestAllocations
 
-	// Compute request allocations with mode-aware ratios
-	requestAllocs = allocation.ComputeRequestAllocationsWithMode(stableAllocations, podParams, mode)
-
-	// Convert to AllocationResult format
 	result := allocation.AllocationResult{
 		Allocations:        stableAllocations,
 		RequestAllocations: requestAllocs,
-		Mode:               mode,
-		TotalNeed:          totalNeed,
 		TotalAlloc:         totalAlloc,
 		Needs:              needsMap,
-		NashIterations:     1, // Track iterations separately for each mechanism
+		NashIterations:     marketResult.NashIterations,
 	}
 
 	// Convert limits to string format ("${m}m")
@@ -1775,4 +1639,92 @@ func (a *Agent) convertPodParamsToAllocationParams(podParams map[types.UID]alloc
 		}
 	}
 	return result
+}
+
+// applyIdleDecay decays allocations for all pods to prevent limit inflation.
+// This is critical for cost efficiency mode to ensure resources are reclaimed during quiet periods.
+func (a *Agent) applyIdleDecay() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for uid, allocationFunc := range a.allocations {
+		// Parse current allocation
+		currentAllocStr := allocationFunc
+		currentAlloc, err := resource.ParseQuantity(currentAllocStr)
+		if err != nil {
+			continue
+		}
+
+		currentMilli := currentAlloc.MilliValue()
+		if currentMilli <= a.config.AbsoluteMinAllocation {
+			continue
+		}
+
+		// Decay
+		decayAmount := int64(float64(currentMilli) * a.config.IdleDecayRate)
+		if decayAmount < 1 {
+			decayAmount = 1 // Minimum decay 1m if rate > 0
+		}
+
+		newMilli := currentMilli - decayAmount
+		if newMilli < a.config.AbsoluteMinAllocation {
+			newMilli = a.config.AbsoluteMinAllocation
+		}
+
+		// Update allocation map
+		// We treat the allocation map as the "current approved" state.
+		// Decay forces the next negotiation to start lower.
+		a.allocations[uid] = resource.NewMilliQuantity(newMilli, resource.DecimalSI).String()
+	}
+}
+
+// shouldManagePod checks if the agent should manage this pod.
+func (a *Agent) shouldManagePod(pod *corev1.Pod) bool {
+	// Skip pods in filtered namespaces (e.g., kube-system)
+	if pod.Namespace == "kube-system" || pod.Namespace == "mbcas-system" {
+		return false
+	}
+
+	// Skip if explicitly disabled via annotation
+	if pod.Annotations["mbcas.io/ignore"] == "true" {
+		return false
+	}
+
+	// Must be running
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	return true
+}
+
+// computeGlobalThrottling computes the average throttling ratio across all managed pods.
+func (a *Agent) computeGlobalThrottling(pods []*corev1.Pod) float64 {
+	var totalThrottling float64
+	var count int
+
+	for _, pod := range pods {
+		// Only count pods we are managing
+		if !a.shouldManagePod(pod) {
+			continue
+		}
+
+		// Read metrics
+		// passing 0 as interval lets the reader rely on actual timestamps
+		result, err := a.cgroupReader.ReadPodMetrics(pod, 0)
+		if err == nil {
+			// DemandResult.Demand is normalized [0,1].
+			// We can use that as proxy for throttling pressure.
+			// Or we might want raw throttling ratio if available?
+			// DemandResult.Demand is (throttling ratio / threshold) normalized.
+			// Let's rely on that normalized pressure as "Global Throttling Pressure".
+			totalThrottling += result.Demand
+			count++
+		}
+	}
+
+	if count == 0 {
+		return 0
+	}
+	return totalThrottling / float64(count)
 }

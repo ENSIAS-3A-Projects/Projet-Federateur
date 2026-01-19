@@ -55,7 +55,25 @@ function Measure-WorkloadMetrics {
         timestamp = (Get-Date -Format "o")
         pods      = @()
         vpas      = @()
+        latency   = @{}
     }
+    
+    # 0. Latency metrics from load generator
+    try {
+        $log = kubectl logs -n $Namespace load-generator --tail=20 2>$null
+        if ($log) {
+            $latencies = $log | Select-String "time_total: ([\d.]+)" | ForEach-Object { [double]$_.Matches[0].Groups[1].Value * 1000 }
+            if ($latencies) {
+                $avg = ($latencies | Measure-Object -Average).Average
+                $p99 = ($latencies | Sort-Object)[[math]::Max(0, [int]($latencies.Count * 0.99) - 1)]
+                $metrics.latency = @{
+                    avgMs = [math]::Round($avg, 2)
+                    p99Ms = [math]::Round($p99, 2)
+                }
+            }
+        }
+    }
+    catch { }
     
     # 1. Pod Resource Usage (kubectl top)
     try {
@@ -67,7 +85,15 @@ function Measure-WorkloadMetrics {
         
         $ErrorActionPreference = $prevErrorAction
         
-        if ($LASTEXITCODE -eq 0 -and $top) {
+        # Retry logic for metrics server (wait up to 30s for metrics-server to pick up new namespace)
+        $top = $null
+        for ($i = 0; $i -lt 5; $i++) {
+            $top = kubectl top pods -n $Namespace --no-headers 2>$null
+            if ($top) { break }
+            Start-Sleep -Seconds 5
+        }
+
+        if ($top) {
             $topLines = $top -split "`n"
             foreach ($line in $topLines) {
                 if ($line -match "^\s*$") { continue }
@@ -100,7 +126,32 @@ function Measure-WorkloadMetrics {
         }
     }
     
-    $metrics | ConvertTo-Json -Depth 10 | Out-File -FilePath $OutputFile -Encoding UTF8 -Append
+    # Write clean JSON manually to avoid PowerShell serialization issues
+    $json = "{"
+    $json += "`"timestamp`":`"$($metrics.timestamp)`","
+    
+    # Latency (Ensure numbers are never null)
+    $avgMs = if ($null -eq $metrics.latency.avgMs) { 0 } else { $metrics.latency.avgMs }
+    $p99Ms = if ($null -eq $metrics.latency.p99Ms) { 0 } else { $metrics.latency.p99Ms }
+    $json += "`"latency`":{`"avgMs`":$avgMs,`"p99Ms`":$p99Ms},"
+    
+    # Pods
+    $json += "`"pods`":["
+    $podList = @()
+    foreach ($p in $metrics.pods) { $podList += "{`"name`":`"$($p.name)`",`"cpu`":`"$($p.cpu)`",`"memory`":`"$($p.memory)`"}" }
+    $json += ($podList -join ",") + "],"
+    
+    # VPAs
+    $json += "`"vpas`":["
+    $vpaList = @()
+    foreach ($v in $metrics.vpas) { 
+        $rec = $v.recommendation | ConvertTo-Json -Compress
+        $vpaList += "{`"name`":`"$($v.name)`",`"recommendation`":$rec}" 
+    }
+    $json += ($vpaList -join ",") + "]"
+    $json += "}"
+    
+    $json | Out-File -FilePath $OutputFile -Encoding UTF8 -Append
 }
 
 # ------------------------------------------------------------------------------
@@ -161,7 +212,7 @@ spec:
     - |
       echo "Starting load generation..."
       while true; do
-        wget -q -O- http://gateway-vpa.$Namespace.svc.cluster.local:8080 > /dev/null 2>&1
+        curl -s -o /dev/null -w "time_total: %{time_total}\n" http://gateway-vpa.$Namespace.svc.cluster.local:8080
         sleep 0.1
       done
 "@

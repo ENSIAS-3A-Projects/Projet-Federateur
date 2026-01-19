@@ -92,7 +92,7 @@ if (-not $skipMinikubeStart) {
     
     Write-Host "  Starting minikube (this may take a few minutes)..." -ForegroundColor Gray
     try {
-        $startResult = & minikube start -p $MinikubeProfile --driver=docker --cpus=$CPUs --memory=$Memory --kubernetes-version=$KubernetesVersion --extra-config=apiserver.feature-gates=InPlacePodVerticalScaling=true --addons=metrics-server 2>&1
+        $startResult = & minikube start -p $MinikubeProfile --driver=docker --extra-config=apiserver.feature-gates=InPlacePodVerticalScaling=true --addons=metrics-server 2>&1
     }
     catch {
         Write-Host "  [WARNING] Minikube start reported errors (likely registry connection, ignoring): $_" -ForegroundColor Yellow

@@ -132,42 +132,66 @@ type AgentConfig struct {
 	// MaxDemandMultiplier controls aggressive scaling in want (default 4.0x max growth).
 	// Used when pod signals it would like more resources.
 	MaxDemandMultiplier float64
+
+	// CostEfficiencyMode enables aggressive cost optimization logic.
+	// When true: Fast Down / Slow Up, idle decay, target throttling.
+	CostEfficiencyMode bool
+
+	// TargetThrottling is the acceptable throttling ratio (0-1).
+	// Allocator will try to keep throttling below this but won't panic if it's non-zero.
+	TargetThrottling float64
+
+	// IdleDecayRate is the rate at which allocation decays when usage is low (per tick).
+	IdleDecayRate float64
+
+	// AlphaDown is the smoothing factor for downward demand adjustments (0-1).
+	// Higher = faster decay.
+	AlphaDown float64
+
+	// AlphaUp is the smoothing factor for upward demand adjustments (0-1).
+	// Lower = slower growth (damped).
+	AlphaUp float64
 }
 
 // DefaultConfig returns a configuration with default values.
 func DefaultConfig() *AgentConfig {
 	return &AgentConfig{
-		SamplingInterval:       1 * time.Second,
-		WriteInterval:          5 * time.Second,
-		MinChangePercent:       2.0,
-		SystemReservePercent:   10.0,
-		BaselineCPUPerPod:      "100m",
-		StartupGracePeriod:     90 * time.Second,
-		SLOTargetLatencyMs:     0, // Disabled by default
-		PrometheusURL:          "", // Empty = disabled
-		FastLoopInterval:       2 * time.Second,
-		SlowLoopInterval:       10 * time.Second,
-		P99ThresholdMultiplier: 1.2,
-		ThrottlingThreshold:    0.1,
-		FastStepSizeMin:            0.20, // 20%
-		FastStepSizeMax:            0.40, // 40%
-		AllocationMechanism:        "nash",
-		EnableKalmanPrediction:     true,  // Enabled by default
-		EnableBatchReconciliation:  true,  // Enabled by default
-		EnablePriceResponse:         true,  // Enabled by default
-		EnableAgentBasedModeling:    true,  // Enabled by default
-		AgentLearningRate:          0.1,   // Moderate learning rate
-		AgentMemorySize:             20,    // Remember last 20 decisions
-		AgentExplorationRate:        0.2,   // 20% exploration initially
-		AgentDiscountFactor:         0.9,   // Value future rewards
+		SamplingInterval:            1 * time.Second,
+		WriteInterval:               5 * time.Second,
+		MinChangePercent:            2.0,
+		SystemReservePercent:        10.0,
+		BaselineCPUPerPod:           "100m",
+		StartupGracePeriod:          90 * time.Second,
+		SLOTargetLatencyMs:          0,  // Disabled by default
+		PrometheusURL:               "", // Empty = disabled
+		FastLoopInterval:            2 * time.Second,
+		SlowLoopInterval:            10 * time.Second,
+		P99ThresholdMultiplier:      1.2,
+		ThrottlingThreshold:         0.1,
+		FastStepSizeMin:             0.20, // 20%
+		FastStepSizeMax:             0.40, // 40%
+		AllocationMechanism:         "nash",
+		EnableKalmanPrediction:      true, // Enabled by default
+		EnableBatchReconciliation:   true, // Enabled by default
+		EnablePriceResponse:         true, // Enabled by default
+		EnableAgentBasedModeling:    true, // Enabled by default
+		AgentLearningRate:           0.1,  // Moderate learning rate
+		AgentMemorySize:             20,   // Remember last 20 decisions
+		AgentExplorationRate:        0.2,  // 20% exploration initially
+		AgentDiscountFactor:         0.9,  // Value future rewards
 		CoalitionGroupingAnnotation: "mbcas.io/coalition",
 		MaxCoalitionSize:            8,     // Limit coalition size to prevent O(2^n) explosion
 		MaxHistorySize:              1000,  // Maximum decision history per pod
-		MinUsageMicroseconds:       1000,  // 1ms minimum usage for valid samples
-		AbsoluteMinAllocation:      10,    // Minimum allocation in millicores
+		MinUsageMicroseconds:        1000,  // 1ms minimum usage for valid samples
+		AbsoluteMinAllocation:       10,    // Minimum allocation in millicores
 		NeedHeadroomFactor:          0.15,  // 15% conservative headroom
 		WantHeadroomFactor:          0.10,  // 10% base headroom
 		MaxDemandMultiplier:         4.0,   // 4x max growth for want calculation
+		CostEfficiencyMode:          false, // Disabled by default, enable via flag/env
+		TargetThrottling:            0.05,  // Target 5% throttling
+		IdleDecayRate:               0.005, // 0.5% decay per tick
+		AlphaDown:                   0.8,   // Aggressive downward adjustment
+		AlphaUp:                     0.1,   // Damped upward adjustment
 	}
 }
 
@@ -656,6 +680,14 @@ func (c *AgentConfig) loadFromEnvironment() {
 			klog.V(2).InfoS("Loaded MaxDemandMultiplier from environment", "value", c.MaxDemandMultiplier)
 		}
 	}
+
+	// MBCAS_COST_EFFICIENCY_MODE
+	if val := os.Getenv("MBCAS_COST_EFFICIENCY_MODE"); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			c.CostEfficiencyMode = b
+			klog.V(2).InfoS("Loaded CostEfficiencyMode from environment", "value", c.CostEfficiencyMode)
+		}
+	}
 }
 
 // Validate validates the configuration values.
@@ -739,4 +771,3 @@ func (c *AgentConfig) Log() {
 		"enableBatchReconciliation", c.EnableBatchReconciliation,
 		"coalitionGroupingAnnotation", c.CoalitionGroupingAnnotation)
 }
-

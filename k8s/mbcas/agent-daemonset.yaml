@@ -45,6 +45,20 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: MBCAS_COST_EFFICIENCY_MODE
+              value: "true"
+            - name: MBCAS_ALPHA_DOWN
+              value: "0.8"
+            - name: MBCAS_ALPHA_UP
+              value: "0.1"
+            - name: MBCAS_IDLE_DECAY_RATE
+              value: "0.01"
+            - name: MBCAS_TARGET_THROTTLING
+              value: "0.05"
+            - name: MBCAS_STARTUP_GRACE_PERIOD
+              value: "5s"
+            - name: MBCAS_BASELINE_CPU_PER_POD
+              value: "20m"
           resources:
             requests:
               cpu: 50m
