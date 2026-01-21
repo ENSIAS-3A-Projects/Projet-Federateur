@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: vpa-mbcas-test
-  labels:
-    name: vpa-mbcas-test
