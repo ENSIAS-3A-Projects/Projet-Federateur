@@ -151,6 +151,11 @@ type AgentConfig struct {
 	// AlphaUp is the smoothing factor for upward demand adjustments (0-1).
 	// Lower = slower growth (damped).
 	AlphaUp float64
+
+	// TotalClusterCPUCapacityMilli is the total CPU capacity available for allocation in millicores.
+	// This is a fixed value defined by the user to avoid relying on node capacity reporting (which can be buggy in minikube).
+	// Default: 4000m (4 cores). Should match the actual CPU available in the cluster.
+	TotalClusterCPUCapacityMilli int64
 }
 
 // DefaultConfig returns a configuration with default values.
@@ -192,6 +197,7 @@ func DefaultConfig() *AgentConfig {
 		IdleDecayRate:               0.005, // 0.5% decay per tick
 		AlphaDown:                   0.8,   // Aggressive downward adjustment
 		AlphaUp:                     0.1,   // Damped upward adjustment
+		TotalClusterCPUCapacityMilli: 4000, // 4 cores default (4000m)
 	}
 }
 
@@ -434,6 +440,15 @@ func (c *AgentConfig) loadFromConfigMap(cm *corev1.ConfigMap) error {
 			return fmt.Errorf("invalid agentDiscountFactor: %w", err)
 		}
 		c.AgentDiscountFactor = f
+	}
+
+	// Parse TotalClusterCPUCapacityMilli
+	if val, ok := data["totalClusterCPUCapacityMilli"]; ok && val != "" {
+		i, err := strconv.ParseInt(val, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid totalClusterCPUCapacityMilli: %w", err)
+		}
+		c.TotalClusterCPUCapacityMilli = i
 	}
 
 	return nil
@@ -740,6 +755,9 @@ func (c *AgentConfig) Validate() error {
 	if c.AllocationMechanism != "nash" && c.AllocationMechanism != "primal-dual" {
 		return fmt.Errorf("allocationMechanism must be 'nash' or 'primal-dual', got %s", c.AllocationMechanism)
 	}
+	if c.TotalClusterCPUCapacityMilli <= 0 {
+		return fmt.Errorf("totalClusterCPUCapacityMilli must be > 0, got %d", c.TotalClusterCPUCapacityMilli)
+	}
 	return nil
 }
 
@@ -769,5 +787,6 @@ func (c *AgentConfig) Log() {
 		"agentExplorationRate", c.AgentExplorationRate,
 		"agentDiscountFactor", c.AgentDiscountFactor,
 		"enableBatchReconciliation", c.EnableBatchReconciliation,
-		"coalitionGroupingAnnotation", c.CoalitionGroupingAnnotation)
+		"coalitionGroupingAnnotation", c.CoalitionGroupingAnnotation,
+		"totalClusterCPUCapacityMilli", c.TotalClusterCPUCapacityMilli)
 }

@@ -23,7 +23,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Use alpine for debugging capability (can exec into container)
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk update && apk add --no-cache ca-certificates tzdata
 
 # Agent needs root to read cgroups
 # Security is enforced via securityContext in DaemonSet

@@ -67,6 +67,25 @@ Solution:
   alloc_B = 100 + (1.0/3.0)*800 = 367m
 ```
 
+### Shadow Price Feedback
+
+The Nash solver computes a **shadow price** (Lagrange multiplier) that indicates resource scarcity:
+
+```
+if totalDemand > capacity:
+    congestionRatio = (totalDemand - capacity) / capacity
+    shadowPrice = congestionRatio * (averageWeight)
+else:
+    shadowPrice = 0.0  # Uncongested
+```
+
+This shadow price is fed back to agents, enabling **price-responsive bidding**:
+- **High shadow price (>0.3)**: Resources scarce → Agents reduce demand
+- **Low shadow price (<0.3)**: Resources abundant → Agents can increase demand
+- **Zero shadow price**: Uncongested → No adjustment needed
+
+This creates a **market mechanism** where agents respond to price signals, improving efficiency.
+
 ### Nash Axioms
 
 The Nash Bargaining Solution satisfies four axioms:
@@ -277,6 +296,32 @@ epsilon_min = 0.01  (always explore 1%)
 Early on: High exploration (try different strategies)  
 Over time: Low exploration (use learned optimal strategy)
 
+### Shadow Price Integration
+
+Agents adjust their action selection based on shadow price:
+
+```go
+// Adjust Q-values by shadow price
+if shadowPrice > 0.3:
+    if action == "aggressive":
+        q -= shadowPrice * 5.0  // Penalize aggressive when scarce
+    else if action == "conservative":
+        q += shadowPrice * 2.0  // Reward conservative when scarce
+
+// Select best action from adjusted Q-values
+action = argmax adjustedQ(state, a)
+```
+
+Additionally, agents reduce demand when shadow price is high:
+
+```go
+if shadowPrice > 0.3:
+    reductionFactor = 1.0 - (shadowPrice * 0.5)  // Max 50% reduction
+    demand = demand * reductionFactor
+```
+
+This creates a **price-taking behavior** where agents respond to market conditions.
+
 ### Learning Example
 
 ```
@@ -324,13 +369,34 @@ Cycle 10:
 │  └──────┬───────┘              └──────┬───────┘        │
 │         │                              │                │
 │         │ Rewards                      │ Allocations    │
+│         │                              │ Shadow Price   │
 │         │                              │                │
 │         └──────────────────────────────┘                │
 │                                                         │
 │  Result: Agents learn to bid truthfully because        │
 │          Nash ensures fair treatment                   │
+│          Shadow prices guide demand adjustment         │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### Two-Pass Bidding with Shadow Price Feedback
+
+The system uses a **two-pass bidding mechanism**:
+
+**Pass 1: Initial Bids**
+- Agents compute bids without shadow price
+- Nash solver computes preview allocation and shadow price
+
+**Pass 2: Adjusted Bids**
+- Agents receive shadow price feedback
+- Adjust action selection (Q-values) and demand based on price
+- Nash solver computes final allocation
+
+This creates a **market-clearing mechanism** where:
+1. Initial bids reveal demand
+2. Shadow price signals scarcity
+3. Agents adjust bids based on price
+4. Final allocation clears the market efficiently
 
 ### Complementary Strengths
 
@@ -341,6 +407,8 @@ Cycle 10:
 | **Efficiency** | Agents optimize locally | Nash ensures global Pareto efficiency |
 | **Robustness** | Agents adapt to changing workloads | Nash handles resource scarcity |
 | **Incentives** | - | Truthful bidding is optimal |
+| **Price Signals** | Agents respond to shadow prices | Shadow price indicates market conditions |
+| **Market Clearing** | Price-responsive demand | Two-pass bidding clears market |
 
 ### Emergent Properties
 
@@ -417,7 +485,7 @@ Given:
 - Each pod i has:
   - Baseline b_i (minimum CPU)
   - Weight w_i (priority)
-  - Demand d_i (from Q-Learning bid)
+  - Demand d_i (from Q-Learning bid, adjusted by shadow price)
 
 Solve:
   maximize  ∏ (x_i - b_i)^w_i
@@ -447,7 +515,22 @@ Final allocation:
   x_i = b_i + w_i · (C - Σ b_i) / Σ w_j
 ```
 
-This is exactly what the Nash solver computes!
+The **Lagrange multiplier λ** is the **shadow price**:
+- **High λ**: Resources scarce, agents should reduce demand
+- **Low λ**: Resources abundant, agents can increase demand
+- **Zero λ**: Uncongested, no adjustment needed
+
+### Shadow Price Computation
+
+```
+if Σ d_i > C:  // Congested
+    congestionRatio = (Σ d_i - C) / C
+    shadowPrice = congestionRatio * (Σ w_i / n)
+else:  // Uncongested
+    shadowPrice = 0.0
+```
+
+This shadow price is fed back to agents in the two-pass bidding mechanism, creating a **market-clearing equilibrium**. The Nash solver computes allocations exactly as shown above!
 
 ---
 

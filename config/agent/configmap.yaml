@@ -13,11 +13,13 @@ data:
 
   # WriteInterval is how often we write PodAllocation updates to the API.
   # Format: Go duration string
-  writeInterval: "5s"
+  # Increased from 5s to 10s to reduce churn while maintaining efficiency
+  writeInterval: "10s"
 
   # MinChangePercent is the minimum change required to write an update (hysteresis).
   # Value: 0.0 to 100.0 (percentage)
-  minChangePercent: "2.0"
+  # Increased from 2.0% to 5.0% to require larger changes before applying (reduces churn)
+  minChangePercent: "5.0"
 
   # SystemReservePercent is the percentage of node CPU to reserve for system.
   # Value: 0.0 to 100.0 (percentage)
@@ -50,7 +52,8 @@ data:
   # SlowLoopInterval is the interval for the slow economic optimizer loop (5-15s).
   # This loop runs market clearing and optimization.
   # Format: Go duration string
-  slowLoopInterval: "10s"
+  # Increased from 10s to 15s to reduce optimization frequency (reduces churn)
+  slowLoopInterval: "15s"
 
   # P99ThresholdMultiplier is the multiplier for p99 latency threshold.
   # Fast loop triggers when p99 > target * P99ThresholdMultiplier.
@@ -87,4 +90,10 @@ data:
   # CoalitionGroupingAnnotation is the annotation key for coalition grouping.
   # Pods with the same annotation value are grouped for joint optimization.
   coalitionGroupingAnnotation: "mbcas.io/coalition"
+
+  # TotalClusterCPUCapacityMilli is the total CPU capacity available for allocation in millicores.
+  # This is a fixed value defined by the user to avoid relying on node capacity reporting (which can be buggy in minikube).
+  # Should match the actual CPU available in the cluster (e.g., "4000" for 4 cores).
+  # Default: 4000m (4 cores)
+  totalClusterCPUCapacityMilli: "4000"
 

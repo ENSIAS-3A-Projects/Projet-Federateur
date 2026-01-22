@@ -35,22 +35,27 @@ func TestPodAgent_BidComputation(t *testing.T) {
 	agent.Usage = 500
 	agent.Throttling = 0.0
 	agent.Allocation = 500
+	agent.Epsilon = 0.0 // Disable exploration for deterministic test
 
-	bid := agent.ComputeBid()
+	conf := DefaultConfig()
+	bid := agent.ComputeBid(conf)
 
 	// Check bid structure
 	if bid.UID != "test-pod" {
 		t.Errorf("Expected UID test-pod, got %s", bid.UID)
 	}
 
-	// Demand should be based on usage with multiplier
-	if bid.Demand < 500 {
-		t.Errorf("Demand should be at least usage (500), got %d", bid.Demand)
+	// Default action is "aggressive" (first in list) -> 1.5 multiplier
+	// 500 * 1.5 = 750
+	if bid.Demand != 750 {
+		t.Errorf("Expected demand 750 (aggressive), got %d", bid.Demand)
 	}
 
-	// Min should be baseline
-	if bid.Min != 100 {
-		t.Errorf("Expected min 100, got %d", bid.Min)
+	// Min should be usage + NeedHeadroomFactor (15%)
+	// 500 * 1.15 = 575
+	expectedMin := int64(500 * 1.15)
+	if bid.Min != expectedMin {
+		t.Errorf("Expected min %d, got %d", expectedMin, bid.Min)
 	}
 
 	// Weight should be positive
@@ -64,13 +69,26 @@ func TestPodAgent_BidWithThrottling(t *testing.T) {
 	agent.Usage = 500
 	agent.Throttling = 0.3 // Significant throttling
 	agent.Allocation = 400
+	agent.Epsilon = 0.0 // Disable exploration
 
-	bid := agent.ComputeBid()
+	conf := DefaultConfig()
+	bid := agent.ComputeBid(conf)
 
 	// With throttling, demand should be higher
-	// Base: 500, multiplier: ~1.2-1.5, throttling: +30%
-	if bid.Demand < 600 {
-		t.Errorf("Demand with throttling should be >600, got %d", bid.Demand)
+	// Base: 500
+	// Action: Aggressive (1.5x)
+	// Throttling Boost: (1 + 0.3*2) = 1.6
+	// 500 * 1.5 * 1.6 = 1200
+	if bid.Demand != 1200 {
+		t.Errorf("Expected demand 1200 with throttling, got %d", bid.Demand)
+	}
+
+	// Max should be capped (10x usage or 10 cores max)
+	// With usage=500, throttling=0.3: demand = 500 * 1.5 * (1 + 0.3*2) = 500 * 1.5 * 1.6 = 1200
+	// Max should be capped at 10x usage (5000) or 10 cores (10000), whichever is lower
+	expectedMax := int64(5000) // 10x usage
+	if bid.Max != expectedMax {
+		t.Errorf("Expected max %d for throttled pod (capped at 10x usage), got %d", expectedMax, bid.Max)
 	}
 }
 
@@ -81,7 +99,8 @@ func TestPodAgent_Learning(t *testing.T) {
 	agent.Allocation = 400
 
 	// Generate initial bid (stores state/action)
-	_ = agent.ComputeBid()
+	conf := DefaultConfig()
+	_ = agent.ComputeBid(conf)
 
 	// Simulate outcome: got good allocation, no throttling
 	agent.Update(600, 0.0, false)
@@ -170,7 +189,8 @@ func TestPodAgent_ConcurrentAccess(t *testing.T) {
 
 	go func() {
 		for i := 0; i < 100; i++ {
-			agent.ComputeBid()
+			conf := DefaultConfig()
+			agent.ComputeBid(conf)
 		}
 		done <- true
 	}()
@@ -194,8 +214,9 @@ func BenchmarkPodAgent_ComputeBid(b *testing.B) {
 	agent.Allocation = 400
 
 	b.ResetTimer()
+	conf := DefaultConfig()
 	for i := 0; i < b.N; i++ {
-		agent.ComputeBid()
+		agent.ComputeBid(conf)
 	}
 }
 
@@ -203,7 +224,8 @@ func BenchmarkPodAgent_ComputeBid(b *testing.B) {
 func BenchmarkPodAgent_Update(b *testing.B) {
 	agent := NewPodAgent("test-pod", 100.0)
 	agent.Usage = 500
-	agent.ComputeBid() // Initialize state
+	conf := DefaultConfig()
+	agent.ComputeBid(conf) // Initialize state
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

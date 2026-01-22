@@ -79,24 +79,52 @@ kubectl get podallocations -A
 
 ## How It Works
 
+### Dual-Loop Architecture
+
+MBCAS uses a **dual-loop architecture** for responsive and efficient resource allocation:
+
+- **Fast Loop** (2s interval): Reacts quickly to SLO violations and high throttling
+  - Only increases allocations (never decreases)
+  - Responds to immediate pressure signals
+  - Prevents performance degradation
+  
+- **Slow Loop** (10-15s interval): Full Nash Bargaining optimization
+  - Complete market clearing with all pods
+  - Q-Learning updates and strategy adaptation
+  - Long-term efficiency optimization
+
 ### 1. Autonomous PodAgents (ABM)
 
 Each pod has a dedicated agent that:
-- **Observes**: CPU usage, throttling, current allocation
+- **Observes**: CPU usage, throttling trends, current allocation
 - **Learns**: Uses Q-Learning to find optimal bidding strategies
-- **Adapts**: Adjusts behavior based on rewards (penalties for throttling/SLO violations)
+- **Adapts**: Adjusts behavior based on rewards and shadow prices
+- **Persists**: Q-tables saved across restarts for continuous learning
 
 **State Space**: `(usage_level, throttle_level, allocation_level)`  
 **Action Space**: `{aggressive, normal, conservative}` bidding  
-**Learning**: ε-greedy Q-Learning with exploration decay
+**Learning**: ε-greedy Q-Learning with exploration decay  
+**Shadow Price Feedback**: Agents adjust bids based on market conditions (high price = conservative, low price = aggressive)
 
-### 2. Nash Bargaining (Game Theory)
+**Key Features**:
+- **Throttling Trend Analysis**: Uses last 3 samples for pattern learning
+- **Oscillation Detection**: Penalizes large allocation changes in reward function
+- **Q-Table Persistence**: Learning state preserved across agent restarts
+- **Startup Grace Period**: Allocations only increase during initial 45-90s
+
+### 2. Nash Bargaining with Shadow Prices (Game Theory)
 
 When total demand exceeds capacity:
 - **Baseline**: Every pod gets a minimum viable allocation
 - **Surplus**: Remaining CPU distributed to maximize Nash product
 - **Fairness**: Weighted by pod priority/importance
 - **Efficiency**: Pareto optimal (no waste)
+- **Shadow Price**: Market-clearing price fed back to agents for demand adjustment
+
+**Shadow Price Mechanism**:
+- High shadow price (>0.3) → Resources scarce → Agents reduce demand
+- Low shadow price → Resources abundant → Agents can increase demand
+- Enables price-responsive bidding behavior
 
 ### 3. Real-Time Metrics
 
@@ -104,6 +132,7 @@ Reads from cgroup v2:
 - `throttled_usec`: Time pod was throttled
 - `usage_usec`: Actual CPU time used
 - **Demand Signal**: `throttling_ratio / threshold` normalized to [0,1]
+- **Actual Usage**: Computed in millicores from delta samples
 
 ---
 
@@ -118,19 +147,34 @@ metadata:
   name: mbcas-agent-config
   namespace: mbcas-system
 data:
-  # How often to sample cgroup metrics
-  samplingInterval: "1s"
+  # Timing intervals
+  samplingInterval: "1s"          # Cgroup metric sampling
+  fastLoopInterval: "2s"          # Fast SLO guardrail loop
+  slowLoopInterval: "15s"         # Slow optimization loop
+  writeInterval: "10s"            # Allocation update frequency
   
-  # How often to write allocation updates
-  writeInterval: "5s"
+  # Resource management
+  systemReservePercent: "10.0"    # System CPU reservation
+  totalClusterCPUCapacityMilli: "4000"  # Total CPU capacity (4 cores)
+  baselineCPUPerPod: "100m"       # Minimum per pod
   
-  # System CPU reservation
-  systemReservePercent: "10.0"
+  # Stability controls
+  minChangePercent: "5.0"         # Hysteresis threshold
+  startupGracePeriod: "45s"       # Grace period for new pods
   
   # Q-Learning parameters
-  agentLearningRate: "0.1"
-  agentExplorationRate: "0.2"
-  agentDiscountFactor: "0.9"
+  agentLearningRate: "0.1"        # Learning rate (α)
+  agentExplorationRate: "0.2"     # Exploration rate (ε)
+  agentDiscountFactor: "0.9"      # Discount factor (γ)
+  
+  # Fast loop thresholds
+  throttlingThreshold: "0.1"      # Throttling ratio trigger
+  fastStepSizeMin: "0.20"         # Min fast step (20%)
+  fastStepSizeMax: "0.40"         # Max fast step (40%)
+  
+  # Optional features
+  prometheusURL: ""               # SLO checking (empty = disabled)
+  costEfficiencyMode: "false"     # Aggressive cost optimization
 ```
 
 See `config/agent/configmap.yaml` for all options.
@@ -161,13 +205,17 @@ metadata:
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
 
 Key components:
-- **Agent** (`pkg/agent/`): Node-level daemon, runs PodAgents and Nash solver
-- **Controller** (`pkg/controller/`): Cluster-level, applies PodAllocation decisions
-- **PodAgent** (`pkg/agent/pod_agent.go`): Per-pod autonomous learning agent
-- **Nash Solver** (`pkg/allocation/nash_simple.go`): Fair allocation algorithm
+- **Agent** (`pkg/agent/`): Node-level daemon, runs dual-loop pipeline with PodAgents and Nash solver
+- **Controller** (`pkg/controller/`): Cluster-level, applies PodAllocation decisions via in-place pod resizing
+- **PodAgent** (`pkg/agent/pod_agent.go`): Per-pod autonomous learning agent with Q-Learning
+- **Nash Solver** (`pkg/allocation/nash_simple.go`): Fair allocation algorithm with shadow price computation
+- **Cgroup Reader** (`pkg/agent/cgroup/`): Reads throttling and usage metrics from cgroup v2
+- **Writer** (`pkg/agent/writer.go`): Creates/updates PodAllocation CRDs
+- **Q-Table Persister** (`pkg/agent/qtable_persister.go`): Saves/loads learning state
+- **SLO Checker** (`pkg/agent/slo_checker.go`): Optional Prometheus integration for latency SLOs
 
 ---
 
@@ -228,10 +276,14 @@ go build ./...
 
 ## Performance
 
-- **Response Time**: 5-10 seconds (configurable via `writeInterval`)
+- **Response Time**: 
+  - Fast loop: 2 seconds (SLO violations, throttling)
+  - Slow loop: 10-15 seconds (full optimization)
 - **Overhead**: <1% CPU per node (agent), <0.1 cores (controller)
 - **Scalability**: O(n) complexity, tested with 100+ pods per node
 - **Zero Downtime**: In-place updates, no pod restarts
+- **Stability**: Exponential smoothing, hysteresis, and cooldown periods prevent oscillations
+- **Learning Persistence**: Q-tables preserved across restarts for continuous improvement
 
 ---
 

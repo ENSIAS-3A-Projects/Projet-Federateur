@@ -116,10 +116,11 @@ Write-Host ""
 Write-Host "[5/9] Configuring Docker environment..." -ForegroundColor Yellow
 
 # Point Docker to Minikube's Docker daemon for efficient image loading
-$env:DOCKER_TLS_VERIFY = "1"
-$env:DOCKER_HOST = (minikube docker-env -p $MinikubeProfile --shell=powershell | Select-String "DOCKER_HOST" | ForEach-Object { $_ -replace '.*"(.*)".*', '$1' })
-$env:DOCKER_CERT_PATH = (minikube docker-env -p $MinikubeProfile --shell=powershell | Select-String "DOCKER_CERT_PATH" | ForEach-Object { $_ -replace '.*"(.*)".*', '$1' })
-$env:MINIKUBE_ACTIVE_DOCKERD = $MinikubeProfile
+# Point Docker to Minikube's Docker daemon for efficient image loading
+minikube docker-env -p $MinikubeProfile --shell=powershell | Invoke-Expression
+if (-not $env:DOCKER_HOST) {
+    throw "Failed to set Docker environment variables from minikube"
+}
 
 Write-Host "  [OK] Docker context set to Minikube" -ForegroundColor Green
 Write-Host ""
