@@ -40,7 +40,7 @@ type PodAgent struct {
 	// Cost efficiency mode
 	SmoothedDemand int64 // EMA smoothed demand
 
-	// IMPROVEMENT #2: Throttling trend for pattern learning (ABM)
+	// Throttling trend for pattern learning (ABM)
 	ThrottlingHistory []float64 // Last 3 throttling samples for trend analysis
 	PrevAllocation    int64     // Previous allocation for oscillation detection
 }
@@ -155,7 +155,7 @@ func (pa *PodAgent) bestActionWithPrice(state string, shadowPrice float64) strin
 		pa.QTable[state] = make(map[string]float64)
 	}
 
-	// IMPROVEMENT #5: Adjust Q-values by shadow price (high price = be conservative)
+	// Adjust Q-values by shadow price (high price = be conservative)
 	adjustedQ := make(map[string]float64)
 	for _, action := range Actions {
 		q := pa.QTable[state][action]
@@ -218,7 +218,7 @@ func (pa *PodAgent) ComputeBidWithShadowPrice(config *AgentConfig, shadowPrice f
 
 	state := pa.stateInternal()
 
-	// IMPROVEMENT #5: Use shadow price to adjust action selection (Game Theory + ABM)
+	// Use shadow price to adjust action selection (Game Theory + ABM)
 	action := pa.selectActionInternalWithPrice(state, shadowPrice)
 
 	pa.PrevState = state
@@ -246,7 +246,7 @@ func (pa *PodAgent) ComputeBidWithShadowPrice(config *AgentConfig, shadowPrice f
 
 	demand := int64(float64(baseDemand) * demandMultiplier)
 
-	// IMPROVEMENT #1: Use shadow price to dampen demand when resources are scarce (Game Theory)
+	// Use shadow price to dampen demand when resources are scarce (Game Theory)
 	if shadowPrice > 0.3 {
 		reductionFactor := 1.0 - (shadowPrice * 0.5) // Max 50% reduction
 		if reductionFactor < 0.5 {
@@ -255,7 +255,7 @@ func (pa *PodAgent) ComputeBidWithShadowPrice(config *AgentConfig, shadowPrice f
 		demand = int64(float64(demand) * reductionFactor)
 	}
 
-	// IMPROVEMENT #2: Use throttling trend instead of current value (ABM pattern learning)
+	// Use throttling trend instead of current value (ABM pattern learning)
 	effectiveThrottling := pa.Throttling
 	if len(pa.ThrottlingHistory) >= 3 {
 		// Use average of last 3 samples to smooth out spikes
@@ -301,7 +301,7 @@ func (pa *PodAgent) ComputeBidWithShadowPrice(config *AgentConfig, shadowPrice f
 
 	var maxBid int64
 	if pa.Throttling > 0.05 {
-		// CRITICAL FIX: Cap maxBid to prevent runaway growth
+		// Cap maxBid to prevent runaway growth
 		usageBasedMax := int64(float64(pa.Usage) * 10.0)
 		absoluteMax := int64(10000) // 10 cores = 10000m
 		maxBid = usageBasedMax
@@ -398,7 +398,7 @@ func (pa *PodAgent) computeRawDemandWithPrice(config *AgentConfig, shadowPrice f
 
 	demand := int64(float64(baseDemand) * multiplier)
 
-	// IMPROVEMENT #1: Use shadow price to dampen demand (Game Theory)
+	// Use shadow price to dampen demand (Game Theory)
 	if shadowPrice > 0.3 {
 		reductionFactor := 1.0 - (shadowPrice * 0.5)
 		if reductionFactor < 0.5 {
@@ -407,7 +407,7 @@ func (pa *PodAgent) computeRawDemandWithPrice(config *AgentConfig, shadowPrice f
 		demand = int64(float64(demand) * reductionFactor)
 	}
 
-	// IMPROVEMENT #2: Use throttling trend (ABM)
+	// Use throttling trend (ABM)
 	effectiveThrottling := pa.Throttling
 	if len(pa.ThrottlingHistory) >= 3 {
 		avgThrottling := 0.0
@@ -425,7 +425,7 @@ func (pa *PodAgent) computeRawDemandWithPrice(config *AgentConfig, shadowPrice f
 	}
 
 	if effectiveThrottling > 0.05 {
-		// CRITICAL FIX: Cap throttling amplification to prevent runaway growth
+		// Cap throttling amplification to prevent runaway growth
 		// Max amplification: 3x (when throttling = 1.0)
 		throttlingMultiplier := 1.0 + effectiveThrottling*2.0
 		if throttlingMultiplier > 3.0 {
@@ -486,7 +486,7 @@ func (pa *PodAgent) Update(newAllocation int64, newThrottling float64, sloViolat
 	pa.mu.Lock()
 	defer pa.mu.Unlock()
 
-	// IMPROVEMENT #2: Track throttling history for trend analysis
+	// Track throttling history for trend analysis
 	pa.ThrottlingHistory = append(pa.ThrottlingHistory, newThrottling)
 	if len(pa.ThrottlingHistory) > 3 {
 		pa.ThrottlingHistory = pa.ThrottlingHistory[len(pa.ThrottlingHistory)-3:]
@@ -528,7 +528,7 @@ func (pa *PodAgent) Update(newAllocation int64, newThrottling float64, sloViolat
 		newQ := currentQ + pa.Alpha*(reward+pa.Gamma*maxNextQ-currentQ)
 		pa.QTable[pa.PrevState][pa.PrevAction] = newQ
 
-		// CRITICAL FIX: Cap Q-table size to prevent memory leaks (LRU-like random eviction)
+		// Cap Q-table size to prevent memory leaks (LRU-like random eviction)
 		const MaxQTableSize = 5000
 		if len(pa.QTable) > MaxQTableSize {
 			// Select a random state to evict (simple but effective for bounding memory)
@@ -581,7 +581,7 @@ func (pa *PodAgent) computeReward(allocation int64, throttling float64, sloViola
 		reward += 5.0
 	}
 
-	// IMPROVEMENT #3: Penalize oscillations in Q-learning reward (ABM)
+	// Penalize oscillations in Q-learning reward (ABM)
 	if pa.PrevAllocation > 0 {
 		changeRatio := math.Abs(float64(allocation-pa.PrevAllocation)) / float64(pa.PrevAllocation)
 		if changeRatio > 0.2 {

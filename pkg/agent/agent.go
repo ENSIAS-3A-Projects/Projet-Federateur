@@ -266,7 +266,7 @@ func (a *Agent) FastStep() {
 		if needsBoost {
 			a.mu.Lock()
 
-			// FIX #2: Add cooldown check for FastLoop
+			// Cooldown check for FastLoop
 			if lastWrite, exists := a.lastWriteTime[pod.UID]; exists {
 				fastCooldown := 5 * time.Second // Shorter than SlowLoop's 30s
 				if time.Since(lastWrite) < fastCooldown {
@@ -295,7 +295,7 @@ func (a *Agent) FastStep() {
 				newAlloc = int64(rawAlloc)
 			}
 
-			// FIX #1: Cap at node capacity
+			// Cap at node capacity
 			nodeCapacity := a.config.TotalClusterCPUCapacityMilli
 			if newAlloc > nodeCapacity {
 				klog.V(2).InfoS("FastStep capped at node capacity",
@@ -500,10 +500,10 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 			continue
 		}
 
-		// IMPROVEMENT #4: Cooldown after allocation changes
+		// Cooldown after allocation changes
 		// Prevent double-allocating by waiting for controller to apply
 		if lastWrite, exists := a.lastWriteTime[pod.UID]; exists {
-			// FIX #3: Add jitter to breakdown synchronization with workload spikes
+			// Add jitter to breakdown synchronization with workload spikes
 			cooldownPeriod := a.getCooldownWithJitter()
 			if time.Since(lastWrite) < cooldownPeriod {
 				klog.V(3).InfoS("Skipping allocation write due to cooldown",
@@ -512,7 +512,7 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 			}
 		}
 
-		// CRITICAL FIX: Cap allocation to prevent runaway growth
+		// Cap allocation to prevent runaway growth
 		// Absolute maximum: 10 cores (10000m) per pod
 		const absoluteMaxAlloc = int64(10000)
 		if allocMilli > absoluteMaxAlloc {
@@ -521,7 +521,7 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 			allocMilli = absoluteMaxAlloc
 		}
 
-		// CRITICAL FIX: Exponential smoothing to prevent oscillations
+		// Exponential smoothing to prevent oscillations
 		// Use asymmetric smoothing: fast down, slow up
 		lastSmoothed := a.smoothedAllocations[pod.UID]
 		if lastSmoothed == 0 {
@@ -560,7 +560,7 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 			}
 		}
 
-		// CRITICAL FIX: Cap allocation to preserve node capacity for new pods
+		// Cap allocation to preserve node capacity for new pods
 		// Never allow a single pod to take more than 75% of node capacity
 		maxPerPod := int64(float64(a.config.TotalClusterCPUCapacityMilli) * 0.75)
 		if smoothedAlloc > maxPerPod {
