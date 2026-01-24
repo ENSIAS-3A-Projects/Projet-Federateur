@@ -26,42 +26,42 @@ spec:
         runAsUser: 1000
         fsGroup: 1000
       containers:
-      - name: controller
-        image: mbcas-controller:latest
-        imagePullPolicy: IfNotPresent
-        command:
-        - /controller
-        args:
-        - --leader-elect=false  # Single replica, no election needed
-        ports:
-        - name: metrics
-          containerPort: 8080
-          protocol: TCP
-        - name: health
-          containerPort: 8081
-          protocol: TCP
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: health
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: health
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        resources:
-          requests:
-            cpu: 50m
-            memory: 64Mi
-          limits:
-            cpu: 200m
-            memory: 256Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop:
-            - ALL
+        - name: controller
+          image: mbcas-controller:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /controller
+          args:
+            - --leader-elect=false # Single replica, no election needed
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
