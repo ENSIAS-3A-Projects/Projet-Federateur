@@ -27,8 +27,8 @@ Each pod is managed by a dedicated agent that learns its resource needs over tim
 ### 2. Market-Based Allocation (Game Theory)
 Instead of simple fair-sharing, MBCAS treats CPU capacity as a finite market.
 - **Bidding**: Agents submit `Bids` containing their `Demand`, `Weight` (priority), and `Min/Max` constraints.
-- **Nash Bargaining Solution**: A solver calculates the allocation that maximizes total system utility while respecting constraints. This acts as the **Mechanism** that ensures fairness and efficiency.
-- **Nash Equilibrium**: Through repeated interactions (Q-Learning), agents learn to bid truthfully. The system converges to a **Nash Equilibrium** where no agent can improve its reward by changing its bid unilaterally.
+- **Market-Clearing Mechanism**: A solver allocates resources proportionally to bids when capacity is scarce, matching supply to demand. This achieves efficient need-based allocation (minimizing waste + throttling).
+- **Nash Equilibrium (Non-Cooperative)**: Through repeated interactions, agents learn that truthful bidding is the dominant strategy in this competitive game.
 - **Shadow Prices**: The mechanism generates a `Shadow Price` representing resource scarcity. Agents use this signal to dampen demand during congestion, further stabilizing the equilibrium.
 
 ### 3. Dual-Loop Control
