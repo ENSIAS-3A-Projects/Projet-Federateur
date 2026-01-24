@@ -1,0 +1,20 @@
+{
+  "test_name": "MBCAS Multi Pod Evaluation",
+  "namespace": "mbcas-test",
+  "start_time": "2026-01-24T01:26:14Z",
+  "samples": [
+    {
+      "timestamp": "2026-01-24T01:26:14Z",
+      "elapsed": 5,
+      "pod": "idle-overprov",
+      "request": "18m",
+      "limit": "21m",
+      "usage": "0m",
+      "request_m": 18,
+      "limit_m": 21,
+      "usage_m": 0,
+      "podalloc_limit": "N/A",
+      "podalloc_status": "N/A",
+      "p50_ms": 0,
+      "p95_ms": 0
+    }

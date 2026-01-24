@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"sync"
@@ -100,17 +101,17 @@ func NewAgent(k8sClient kubernetes.Interface, restConfig *rest.Config, nodeName 
 	}
 
 	agent := &Agent{
-		k8sClient:       k8sClient,
-		nodeName:        nodeName,
-		ctx:             ctx,
-		cancel:          cancel,
-		cgroupReader:    cgroupReader,
-		writer:          writer,
-		podInformer:     podInformer,
-		sloChecker:      sloChecker,
-		qPersister:      qPersister,
-		podAgents:       make(map[types.UID]*PodAgent),
-		config:          config,
+		k8sClient:           k8sClient,
+		nodeName:            nodeName,
+		ctx:                 ctx,
+		cancel:              cancel,
+		cgroupReader:        cgroupReader,
+		writer:              writer,
+		podInformer:         podInformer,
+		sloChecker:          sloChecker,
+		qPersister:          qPersister,
+		podAgents:           make(map[types.UID]*PodAgent),
+		config:              config,
 		lastAllocations:     make(map[types.UID]int64),
 		smoothedAllocations: make(map[types.UID]int64),
 		lastWriteTime:       make(map[types.UID]time.Time),
@@ -166,27 +167,28 @@ func (a *Agent) Step() {
 
 	// 1. Discover Pods on this node
 	pods, err := a.podInformer.ListPods()
-	if err != nil || len(pods) == 0 {
-		klog.V(4).InfoS("No pods to manage", "err", err)
+	if err != nil {
+		klog.V(4).InfoS("Failed to list pods", "err", err)
 		return
 	}
 
-	// 2. Sync Agents (create new, remove dead)
-	a.syncAgents(pods)
+	// 2. Filter out terminating pods
+	var activePods []*corev1.Pod
+	for _, p := range pods {
+		if p.DeletionTimestamp != nil || p.Status.Reason == "Evicted" {
+			continue
+		}
+		activePods = append(activePods, p)
+	}
+	pods = activePods
 
 	// 3. Bid Phase (Agents observe their state and Bid)
-	// collectBids now returns shadow price for feedback
 	bids, shadowPrice := a.collectBids(pods)
 
 	// 4. Bargain Phase (Resolve conflict using Nash Bargaining)
-	// Use fixed capacity from config (user-defined, avoids minikube CPU reporting bug)
 	capacity := a.config.TotalClusterCPUCapacityMilli
-	
-	// Subtract CPU used by unmanaged pods (kube-system, etc)
 	unmanagedUsage := a.getUnmanagedPodsCPU()
 	available := capacity - unmanagedUsage
-	
-	// Apply system reserve
 	reserve := int64(float64(available) * (a.config.SystemReservePercent / 100.0))
 	available = available - reserve
 
@@ -194,13 +196,15 @@ func (a *Agent) Step() {
 		available = 0
 	}
 
-	// Use NashBargainWithPrice to get final allocations and shadow price
 	resultWithPrice := allocation.NashBargainWithPrice(available, bids)
 	results := resultWithPrice.Allocations
-	shadowPrice = resultWithPrice.ShadowPrice // Use final shadow price
+	shadowPrice = resultWithPrice.ShadowPrice
 
 	// 5. Act Phase (Write allocations with shadow price feedback)
 	a.apply(pods, results, shadowPrice)
+
+	// 6. Sync Agents (create new, remove dead)
+	a.syncAgents(pods)
 
 	// Cleanup stale cgroup samples
 	existingPods := make(map[string]bool)
@@ -227,6 +231,11 @@ func (a *Agent) FastStep() {
 	}
 
 	for _, pod := range pods {
+		// Skip terminating or evicted pods
+		if pod.DeletionTimestamp != nil || pod.Status.Reason == "Evicted" {
+			continue
+		}
+
 		a.mu.RLock()
 		agent := a.podAgents[pod.UID]
 		a.mu.RUnlock()
@@ -240,7 +249,7 @@ func (a *Agent) FastStep() {
 		}
 
 		needsBoost := false
-		
+
 		// Check throttling threshold
 		if metrics.Demand > a.config.ThrottlingThreshold {
 			needsBoost = true
@@ -256,17 +265,58 @@ func (a *Agent) FastStep() {
 
 		if needsBoost {
 			a.mu.Lock()
+
+			// FIX #2: Add cooldown check for FastLoop
+			if lastWrite, exists := a.lastWriteTime[pod.UID]; exists {
+				fastCooldown := 5 * time.Second // Shorter than SlowLoop's 30s
+				if time.Since(lastWrite) < fastCooldown {
+					klog.V(3).InfoS("FastStep cooldown active",
+						"pod", pod.Name,
+						"sinceLastWrite", time.Since(lastWrite))
+					a.mu.Unlock()
+					continue
+				}
+			}
+
 			currentAlloc := a.lastAllocations[pod.UID]
 			if currentAlloc == 0 {
 				currentAlloc = 100
 			}
 
 			// Fast step up
-			stepSize := a.config.FastStepSizeMin + 
+			stepSize := a.config.FastStepSizeMin +
 				(a.config.FastStepSizeMax-a.config.FastStepSizeMin)*metrics.Demand
-			newAlloc := int64(float64(currentAlloc) * (1.0 + stepSize))
-			
+
+			rawAlloc := float64(currentAlloc) * (1.0 + stepSize)
+			var newAlloc int64
+			if rawAlloc > float64(math.MaxInt64) {
+				newAlloc = math.MaxInt64
+			} else {
+				newAlloc = int64(rawAlloc)
+			}
+
+			// FIX #1: Cap at node capacity
+			nodeCapacity := a.config.TotalClusterCPUCapacityMilli
+			if newAlloc > nodeCapacity {
+				klog.V(2).InfoS("FastStep capped at node capacity",
+					"pod", pod.Name,
+					"requested", newAlloc,
+					"capped", nodeCapacity)
+				newAlloc = nodeCapacity
+			}
+
+			// Also cap at pod's manifest limit
+			podLimit := a.getPodCPULimit(pod)
+			if newAlloc > podLimit {
+				klog.V(2).InfoS("FastStep capped at pod limit",
+					"pod", pod.Name,
+					"requested", newAlloc,
+					"capped", podLimit)
+				newAlloc = podLimit
+			}
+
 			a.lastAllocations[pod.UID] = newAlloc
+			a.lastWriteTime[pod.UID] = time.Now() // Update write time
 			a.mu.Unlock()
 
 			reqMilli := int64(float64(newAlloc) * 0.9)
@@ -297,7 +347,11 @@ func (a *Agent) syncAgents(pods []*corev1.Pod) {
 		}
 		if _, exists := a.podAgents[pod.UID]; !exists {
 			sloTarget := extractSLOTarget(pod)
-			agent := NewPodAgentWithConfig(pod.UID, sloTarget, a.config)
+			podStartTime := time.Now()
+			if pod.Status.StartTime != nil {
+				podStartTime = pod.Status.StartTime.Time
+			}
+			agent := NewPodAgentWithConfig(pod.UID, sloTarget, a.config, podStartTime)
 			// Load Q-table if available
 			if a.qPersister != nil {
 				if qtable, err := a.qPersister.Load(a.ctx, pod.UID); err == nil && qtable != nil {
@@ -449,8 +503,8 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 		// IMPROVEMENT #4: Cooldown after allocation changes
 		// Prevent double-allocating by waiting for controller to apply
 		if lastWrite, exists := a.lastWriteTime[pod.UID]; exists {
-			// Increased cooldown from 15s to 30s to reduce churn while maintaining efficiency
-			cooldownPeriod := 30 * time.Second // Wait 30s between writes
+			// FIX #3: Add jitter to breakdown synchronization with workload spikes
+			cooldownPeriod := a.getCooldownWithJitter()
 			if time.Since(lastWrite) < cooldownPeriod {
 				klog.V(3).InfoS("Skipping allocation write due to cooldown",
 					"pod", pod.Name, "remaining", cooldownPeriod-time.Since(lastWrite))
@@ -462,7 +516,7 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 		// Absolute maximum: 10 cores (10000m) per pod
 		const absoluteMaxAlloc = int64(10000)
 		if allocMilli > absoluteMaxAlloc {
-			klog.V(2).InfoS("Capping allocation to absolute max", 
+			klog.V(2).InfoS("Capping allocation to absolute max",
 				"pod", pod.Name, "requested", allocMilli, "capped", absoluteMaxAlloc)
 			allocMilli = absoluteMaxAlloc
 		}
@@ -497,13 +551,22 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 		}
 
 		lastAlloc := a.lastAllocations[pod.UID]
-		
+
 		// Hysteresis: skip if change is below threshold
 		if lastAlloc > 0 {
 			changePct := math.Abs(float64(smoothedAlloc-lastAlloc)) / float64(lastAlloc) * 100
 			if changePct < a.config.MinChangePercent {
 				continue
 			}
+		}
+
+		// CRITICAL FIX: Cap allocation to preserve node capacity for new pods
+		// Never allow a single pod to take more than 75% of node capacity
+		maxPerPod := int64(float64(a.config.TotalClusterCPUCapacityMilli) * 0.75)
+		if smoothedAlloc > maxPerPod {
+			klog.V(2).InfoS("Capping allocation to per-pod node share",
+				"pod", pod.Name, "requested", smoothedAlloc, "capped", maxPerPod)
+			smoothedAlloc = maxPerPod
 		}
 
 		a.lastAllocations[pod.UID] = smoothedAlloc
@@ -536,7 +599,6 @@ func (a *Agent) apply(pods []*corev1.Pod, results map[types.UID]int64, shadowPri
 	}
 }
 
-
 func (a *Agent) getUnmanagedPodsCPU() int64 {
 	allPods, err := a.k8sClient.CoreV1().Pods("").List(a.ctx, metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + a.nodeName,
@@ -566,6 +628,24 @@ func (a *Agent) sumDemand(bids []allocation.Bid) int64 {
 	return total
 }
 
+func (a *Agent) getPodCPULimit(pod *corev1.Pod) int64 {
+	if len(pod.Spec.Containers) > 0 {
+		if limit, ok := pod.Spec.Containers[0].Resources.Limits[corev1.ResourceCPU]; ok {
+			return limit.MilliValue()
+		}
+	}
+	// Fallback to node capacity if no limit is set
+	return a.config.TotalClusterCPUCapacityMilli
+}
+
+func (a *Agent) getCooldownWithJitter() time.Duration {
+	baseCooldown := 30 * time.Second
+	jitterRange := 5 * time.Second
+	// rand.Float64() returns [0.0, 1.0)
+	jitter := time.Duration(rand.Float64()*float64(jitterRange*2)) - jitterRange
+	return baseCooldown + jitter // 25s - 35s
+}
+
 func (a *Agent) Stop() {
 	a.cancel()
 }
@@ -573,7 +653,7 @@ func (a *Agent) Stop() {
 // startHealthServer starts the HTTP health server
 func (a *Agent) startHealthServer() {
 	mux := http.NewServeMux()
-	
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -593,11 +673,11 @@ func (a *Agent) startHealthServer() {
 		a.mu.RLock()
 		podCount := len(a.podAgents)
 		a.mu.RUnlock()
-		
+
 		fmt.Fprintf(w, "# HELP mbcas_managed_pods Number of pods managed by this agent\n")
 		fmt.Fprintf(w, "# TYPE mbcas_managed_pods gauge\n")
 		fmt.Fprintf(w, "mbcas_managed_pods %d\n", podCount)
-		
+
 		// Prometheus metrics handler would go here if using promhttp
 		// For now, we just expose basic metrics
 	})

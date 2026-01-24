@@ -69,7 +69,10 @@ func NewPodAgent(uid types.UID, sloTarget float64) *PodAgent {
 }
 
 // NewPodAgentWithConfig creates a new agent with configuration
-func NewPodAgentWithConfig(uid types.UID, sloTarget float64, config *AgentConfig) *PodAgent {
+func NewPodAgentWithConfig(uid types.UID, sloTarget float64, config *AgentConfig, startTime time.Time) *PodAgent {
+	if startTime.IsZero() {
+		startTime = time.Now()
+	}
 	return &PodAgent{
 		UID:            uid,
 		SLOTarget:      sloTarget,
@@ -78,7 +81,7 @@ func NewPodAgentWithConfig(uid types.UID, sloTarget float64, config *AgentConfig
 		Gamma:          config.AgentDiscountFactor,
 		Epsilon:        config.AgentExplorationRate,
 		Allocation:     100,
-		StartTime:      time.Now(),
+		StartTime:      startTime,
 		SmoothedDemand: 100,
 	}
 }
@@ -214,7 +217,7 @@ func (pa *PodAgent) ComputeBidWithShadowPrice(config *AgentConfig, shadowPrice f
 	inGracePeriod := time.Since(pa.StartTime) < config.StartupGracePeriod
 
 	state := pa.stateInternal()
-	
+
 	// IMPROVEMENT #5: Use shadow price to adjust action selection (Game Theory + ABM)
 	action := pa.selectActionInternalWithPrice(state, shadowPrice)
 
@@ -347,11 +350,11 @@ func (pa *PodAgent) ComputeBidWithEfficiencyAndPrice(config *AgentConfig, shadow
 		// Asymmetric smoothing: fast down, slow up
 		if rawDemand < pa.SmoothedDemand {
 			// Going down: fast (high alpha)
-			pa.SmoothedDemand = int64(config.AlphaDown*float64(rawDemand) + 
+			pa.SmoothedDemand = int64(config.AlphaDown*float64(rawDemand) +
 				(1-config.AlphaDown)*float64(pa.SmoothedDemand))
 		} else {
 			// Going up: slow (low alpha)
-			pa.SmoothedDemand = int64(config.AlphaUp*float64(rawDemand) + 
+			pa.SmoothedDemand = int64(config.AlphaUp*float64(rawDemand) +
 				(1-config.AlphaUp)*float64(pa.SmoothedDemand))
 		}
 
@@ -394,7 +397,7 @@ func (pa *PodAgent) computeRawDemandWithPrice(config *AgentConfig, shadowPrice f
 	}
 
 	demand := int64(float64(baseDemand) * multiplier)
-	
+
 	// IMPROVEMENT #1: Use shadow price to dampen demand (Game Theory)
 	if shadowPrice > 0.3 {
 		reductionFactor := 1.0 - (shadowPrice * 0.5)
@@ -524,6 +527,19 @@ func (pa *PodAgent) Update(newAllocation int64, newThrottling float64, sloViolat
 		// Update Q-value
 		newQ := currentQ + pa.Alpha*(reward+pa.Gamma*maxNextQ-currentQ)
 		pa.QTable[pa.PrevState][pa.PrevAction] = newQ
+
+		// CRITICAL FIX: Cap Q-table size to prevent memory leaks (LRU-like random eviction)
+		const MaxQTableSize = 5000
+		if len(pa.QTable) > MaxQTableSize {
+			// Select a random state to evict (simple but effective for bounding memory)
+			// This is better than LRU which would require tracking timestamps for every state
+			for state := range pa.QTable {
+				if state != currentState && state != pa.PrevState {
+					delete(pa.QTable, state)
+					break
+				}
+			}
+		}
 	}
 
 	// Decay exploration over time (anneal)

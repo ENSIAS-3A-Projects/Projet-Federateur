@@ -52,6 +52,11 @@ func NashBargain(capacity int64, bids []Bid) map[types.UID]int64 {
 		}
 
 		if activeWeight == 0 {
+			// Fallback: equal distribution if no weights are set
+			share := remaining / int64(len(active))
+			for _, b := range active {
+				allocations[b.UID] += share
+			}
 			break
 		}
 

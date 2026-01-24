@@ -11,7 +11,7 @@ func TestPodAgent_StartupGracePeriodPreventsDecrease(t *testing.T) {
 	config := DefaultConfig()
 	config.StartupGracePeriod = 1 * time.Minute
 
-	agent := NewPodAgentWithConfig(types.UID("pod-1"), 0.0, config)
+	agent := NewPodAgentWithConfig(types.UID("pod-1"), 0.0, config, time.Now())
 	agent.Usage = 200
 	agent.Allocation = 500
 	agent.Throttling = 0.0
@@ -27,7 +27,7 @@ func TestPodAgent_AfterGracePeriodAllowsDecrease(t *testing.T) {
 	config := DefaultConfig()
 	config.StartupGracePeriod = 1 * time.Millisecond
 
-	agent := NewPodAgentWithConfig(types.UID("pod-1"), 0.0, config)
+	agent := NewPodAgentWithConfig(types.UID("pod-1"), 0.0, config, time.Now())
 	agent.StartTime = time.Now().Add(-1 * time.Second)
 	agent.Usage = 200
 	agent.Allocation = 500
